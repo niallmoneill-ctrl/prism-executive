@@ -85,7 +85,7 @@ export default function AssessPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ firstName, lastName, email, phone, industry, seniority, role, company, location, linkedin,
-          company, industry, title: role,
+          title: role,
           toolUsed: 'assessment', intent: 'development',
         }),
       });
