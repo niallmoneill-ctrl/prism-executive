@@ -1,0 +1,36 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+:root {
+  --prism-black: #1A1A1A;
+  --prism-charcoal: #333333;
+  --prism-gold: #B8975A;
+  --prism-gold-dark: #96793F;
+  --prism-white: #FFFFFF;
+  --prism-warm-grey: #F5F3EF;
+  --prism-border: #E8E5DF;
+  --prism-muted: #888888;
+  --prism-navy: #0F1D35;
+  --dim-exploration: #9B4D3A;
+  --dim-structure: #3A5A8C;
+  --dim-drive: #3A7052;
+  --dim-connection: #6B4A7D;
+}
+
+body {
+  font-family: 'DM Sans', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  background: var(--prism-warm-grey);
+  color: var(--prism-charcoal);
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, h4 {
+  font-family: 'Cormorant Garamond', Georgia, 'Times New Roman', serif;
+}
+
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #D4D1CA; border-radius: 3px; }
