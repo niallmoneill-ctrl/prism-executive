@@ -3,7 +3,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY")!;
 const FROM_NAME = "Prism Executive";
 const FROM_EMAIL = "hello@prismexecutive.com";
-const ORLA_EMAIL = "orla.brennan@prismexecutive.com";
+const ORLA_EMAIL = "orla.brennan@prismexecutive.ie";
 const FALLBACK_FROM = "onboarding@resend.dev"; // used until domain verified
 
 const corsHeaders = {
@@ -152,7 +152,7 @@ const welcomeEmail = (firstName: string) => base(`
     ${divider}
     <tr><td style="padding:32px 40px 48px;text-align:center;">
       ${btn("Begin Your Assessment", "https://prismexecutive.com/assess")}
-      <p style="font-family:'DM Sans',Arial,sans-serif;font-size:12px;color:${C.muted};margin:20px 0 0;">Questions? Reply to this email or contact <a href="mailto:orla.brennan@prismexecutive.com" style="color:${C.gold};text-decoration:none;">orla.brennan@prismexecutive.com</a></p>
+      <p style="font-family:'DM Sans',Arial,sans-serif;font-size:12px;color:${C.muted};margin:20px 0 0;">Questions? Reply to this email or contact <a href="mailto:orla.brennan@prismexecutive.ie" style="color:${C.gold};text-decoration:none;">orla.brennan@prismexecutive.ie</a></p>
     </td></tr>
   </table>`,
   `Welcome to Prism Executive, ${firstName} — begin your behavioural assessment today.`
@@ -236,7 +236,7 @@ const professionalReportEmail = (firstName: string, scores: Record<string, numbe
         <tr>
           <td style="padding-right:12px;">${btn("View Your Report", "https://prismexecutive.com/account")}</td>
           <td>
-            <a href="mailto:orla.brennan@prismexecutive.com?subject=Report Debrief Request" style="display:inline-block;padding:14px 24px;font-family:'DM Sans',Arial,sans-serif;font-size:13px;font-weight:500;color:${C.dark};text-decoration:none;letter-spacing:0.05em;border:1px solid ${C.border};border-radius:8px;">Book a Debrief</a>
+            <a href="mailto:orla.brennan@prismexecutive.ie?subject=Report Debrief Request" style="display:inline-block;padding:14px 24px;font-family:'DM Sans',Arial,sans-serif;font-size:13px;font-weight:500;color:${C.dark};text-decoration:none;letter-spacing:0.05em;border:1px solid ${C.border};border-radius:8px;">Book a Debrief</a>
           </td>
         </tr>
       </table>
@@ -281,7 +281,7 @@ const paymentConfirmationEmail = (firstName: string, tier: string, amount: strin
     <tr><td style="padding:32px 40px 48px;text-align:center;">
       <p style="font-family:'DM Sans',Arial,sans-serif;font-size:14px;color:${C.text};margin:0 0 24px;">Your assessment is ready to begin. Complete it at your own pace — your progress is saved automatically.</p>
       ${btn("Begin Your Assessment", "https://prismexecutive.com/account")}
-      <p style="font-family:'DM Sans',Arial,sans-serif;font-size:12px;color:${C.muted};margin:20px 0 0;">Questions? Contact <a href="mailto:orla.brennan@prismexecutive.com" style="color:${C.gold};text-decoration:none;">orla.brennan@prismexecutive.com</a></p>
+      <p style="font-family:'DM Sans',Arial,sans-serif;font-size:12px;color:${C.muted};margin:20px 0 0;">Questions? Contact <a href="mailto:orla.brennan@prismexecutive.ie" style="color:${C.gold};text-decoration:none;">orla.brennan@prismexecutive.ie</a></p>
     </td></tr>
   </table>`,
   `Payment confirmed — your Prism ${tier} assessment is now active.`
@@ -335,7 +335,7 @@ const leadAlertEmail = (lead: Record<string, any>) => base(`
 // SEND FUNCTION
 // ═══════════════════════════════════════════════════════════════════════════════
 async function sendEmail(to: string, subject: string, html: string, replyTo?: string) {
-  const fromEmail = RESEND_API_KEY.startsWith("re_") ? FROM_EMAIL : FALLBACK_FROM;
+  const fromEmail = FALLBACK_FROM;
   const res = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: {
