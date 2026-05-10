@@ -3,13 +3,21 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 
+const LEAD_STATUSES = ['new','contacted','qualified','proposal','negotiation','won','lost','nurturing'] as const;
+const STATUS_COLORS: Record<string,string> = {new:'red',contacted:'blue',qualified:'amber',proposal:'purple',negotiation:'purple',won:'green',lost:'red',nurturing:'blue'};
+
 export default function AdminPage() {
   const [pg, setPg] = useState('overview');
   const [sideOpen, setSideOpen] = useState(true);
   const [detail, setDetail] = useState<any>(null);
   const [detailType, setDetailType] = useState('');
+  const [noteText, setNoteText] = useState('');
+  const [nextAction, setNextAction] = useState('');
+  const [nextDate, setNextDate] = useState('');
+  const [saving, setSaving] = useState(false);
   const [data, setData] = useState<any>({ leads:[], activities:[], orgs:[], candidates:[], searches:[], invoices:[], assessments:[] });
   const [loading, setLoading] = useState(true);
+  const [leadFilter, setLeadFilter] = useState<'all'|'individual'|'company'>('all');
 
   useEffect(() => {
     loadData();
@@ -18,6 +26,7 @@ export default function AdminPage() {
       .on('postgres_changes',{event:'*',schema:'public',table:'activities'},()=>loadData())
       .on('postgres_changes',{event:'*',schema:'public',table:'assessments'},()=>loadData())
       .on('postgres_changes',{event:'*',schema:'public',table:'candidates'},()=>loadData())
+      .on('postgres_changes',{event:'*',schema:'public',table:'organisations'},()=>loadData())
       .subscribe();
     return () => { supabase.removeChannel(ch); };
   }, []);
@@ -32,16 +41,113 @@ export default function AdminPage() {
       supabase.from('invoices').select('*').order('created_at',{ascending:false}),
       supabase.from('assessments').select('*').eq('status','completed').order('created_at',{ascending:false}).limit(50),
     ]);
-    setData({
-      leads:leads.data||[], activities:activities.data||[], orgs:orgs.data||[],
-      candidates:candidates.data||[], searches:searches.data||[], invoices:invoices.data||[],
-      assessments:assessments.data||[],
-    });
+    setData({ leads:leads.data||[], activities:activities.data||[], orgs:orgs.data||[], candidates:candidates.data||[], searches:searches.data||[], invoices:invoices.data||[], assessments:assessments.data||[] });
     setLoading(false);
   };
 
-  const openDetail = (item: any, type: string) => { setDetail(item); setDetailType(type); };
+  const openDetail = (item: any, type: string) => {
+    setDetail(item); setDetailType(type);
+    setNoteText(''); setNextAction(item.next_action||''); setNextDate(item.next_action_date||'');
+  };
   const closeDetail = () => { setDetail(null); setDetailType(''); };
+
+  // ─── LEAD ACTIONS ───
+  const updateLeadStatus = async (newStatus: string) => {
+    setSaving(true);
+    await supabase.from('leads').update({ status: newStatus }).eq('id', detail.id);
+    await supabase.from('activities').insert({
+      type: 'status_changed',
+      description: `Lead ${detail.first_name} ${detail.last_name||''} status → ${newStatus}`,
+      actor_name: 'Orla Brennan', lead_id: detail.id,
+      metadata: { from: detail.status, to: newStatus },
+    });
+    setDetail({ ...detail, status: newStatus });
+    setSaving(false);
+    loadData();
+  };
+
+  const saveNextAction = async () => {
+    setSaving(true);
+    await supabase.from('leads').update({ next_action: nextAction, next_action_date: nextDate || null }).eq('id', detail.id);
+    setDetail({ ...detail, next_action: nextAction, next_action_date: nextDate });
+    setSaving(false);
+  };
+
+  const saveNote = async () => {
+    if (!noteText.trim()) return;
+    setSaving(true);
+    await supabase.from('leads').update({
+      notes: detail.notes ? `${detail.notes}\n\n[${new Date().toLocaleDateString('en-IE')}] ${noteText}` : `[${new Date().toLocaleDateString('en-IE')}] ${noteText}`
+    }).eq('id', detail.id);
+    await supabase.from('activities').insert({
+      type: 'note_added',
+      description: `Note on ${detail.first_name} ${detail.last_name||''}: ${noteText.slice(0,80)}`,
+      actor_name: 'Orla Brennan', lead_id: detail.id,
+    });
+    setDetail({ ...detail, notes: detail.notes ? `${detail.notes}\n\n[${new Date().toLocaleDateString('en-IE')}] ${noteText}` : `[${new Date().toLocaleDateString('en-IE')}] ${noteText}` });
+    setNoteText('');
+    setSaving(false);
+    loadData();
+  };
+
+  const convertToCompany = async () => {
+    if (!detail.company_name) { alert('No company name on this lead'); return; }
+    setSaving(true);
+    const validIndustries = ['healthcare','pharma','finance','construction','solar','engineering','professional_services','fmcg','ict','not_for_profit','other'];
+    let ind = detail.industry ? String(detail.industry).toLowerCase().replace(/[&\s]+/g,'_').replace(/_+/g,'_') : null;
+    if (ind && !validIndustries.includes(ind)) ind = 'other';
+
+    const { data: org, error } = await supabase.from('organisations').insert({
+      name: detail.company_name, industry: ind, company_size: detail.company_size,
+      website: detail.website, tier: 'prospect', source: detail.source,
+    }).select().single();
+
+    if (org) {
+      await supabase.from('leads').update({ status: 'won', converted_to_org_id: org.id, converted_at: new Date().toISOString() }).eq('id', detail.id);
+      await supabase.from('contacts').insert({
+        organisation_id: org.id, first_name: detail.first_name, last_name: detail.last_name,
+        email: detail.email, phone: detail.phone, job_title: detail.job_title, is_primary: true, is_decision_maker: true,
+      });
+      await supabase.from('activities').insert({
+        type: 'lead_created', description: `Lead converted to company: ${detail.company_name}`,
+        actor_name: 'Orla Brennan', lead_id: detail.id, organisation_id: org.id,
+      });
+      setDetail({ ...detail, status: 'won', converted_to_org_id: org.id });
+      alert(`${detail.company_name} created as a company with ${detail.first_name} as primary contact.`);
+    } else {
+      alert('Error: ' + (error?.message || 'Unknown'));
+    }
+    setSaving(false);
+    loadData();
+  };
+
+  const convertToCandidate = async () => {
+    setSaving(true);
+    const { data: existing } = await supabase.from('candidates').select('id').eq('email', detail.email).maybeSingle();
+    if (existing) { alert('Candidate already exists with this email.'); setSaving(false); return; }
+
+    const validIndustries = ['healthcare','pharma','finance','construction','solar','engineering','professional_services','fmcg','ict','not_for_profit','other'];
+    let ind = detail.industry ? String(detail.industry).toLowerCase().replace(/[&\s]+/g,'_').replace(/_+/g,'_') : null;
+    if (ind && !validIndustries.includes(ind)) ind = 'other';
+
+    const { data: cand } = await supabase.from('candidates').insert({
+      first_name: detail.first_name, last_name: detail.last_name || '',
+      email: detail.email, phone: detail.phone,
+      current_title: detail.job_title || detail.role_hiring, industry: ind,
+      source: detail.source || 'website', is_active: true,
+      gdpr_consent: true, gdpr_consent_date: new Date().toISOString(),
+    }).select().single();
+
+    if (cand) {
+      await supabase.from('activities').insert({
+        type: 'candidate_added', description: `Lead ${detail.first_name} ${detail.last_name||''} converted to candidate`,
+        actor_name: 'Orla Brennan', lead_id: detail.id, candidate_id: cand.id,
+      });
+      alert(`${detail.first_name} added as a candidate.`);
+    }
+    setSaving(false);
+    loadData();
+  };
 
   const NAV = [
     {id:'overview',label:'Overview',e:'◆'},{id:'leads',label:'Leads',e:'◎'},
@@ -79,15 +185,30 @@ export default function AdminPage() {
     );
   };
 
-  /* DETAIL DRAWER */
+  const filteredLeads = data.leads.filter((l: any) => {
+    if (leadFilter === 'company') return l.company_name && l.company_name.trim() !== '';
+    if (leadFilter === 'individual') return !l.company_name || l.company_name.trim() === '';
+    return true;
+  });
+
+  /* ═══ DETAIL DRAWER ═══ */
   const Drawer = () => {
     if (!detail) return null;
+    const isLead = detailType === 'Lead';
+    const isCompany = !!(detail.company_name && detail.company_name.trim());
+    const currentIdx = LEAD_STATUSES.indexOf(detail.status);
+
     return (
       <>
         <div onClick={closeDetail} className="fixed inset-0 bg-black/20 z-[199]"/>
-        <div className="fixed top-0 right-0 w-[420px] max-w-[90vw] h-full bg-white border-l border-[#E8E5DF] z-[200] overflow-y-auto shadow-xl">
+        <div className="fixed top-0 right-0 w-[440px] max-w-[92vw] h-full bg-white border-l border-[#E8E5DF] z-[200] overflow-y-auto shadow-xl">
           <div className="sticky top-0 bg-white border-b border-[#E8E5DF] px-6 py-4 flex justify-between items-center z-10">
-            <span className="text-[10px] text-[#888] font-semibold tracking-wider uppercase">{detailType} Detail</span>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] text-[#888] font-semibold tracking-wider uppercase">{detailType}</span>
+              {isLead && (
+                <Pill c={isCompany ? 'purple' : 'blue'}>{isCompany ? 'Company' : 'Individual'}</Pill>
+              )}
+            </div>
             <button onClick={closeDetail} className="w-7 h-7 rounded-lg bg-[#F5F3EF] border border-[#E8E5DF] flex items-center justify-center text-[#888] text-sm cursor-pointer hover:bg-[#E8E5DF]">✕</button>
           </div>
           <div className="p-6">
@@ -101,16 +222,58 @@ export default function AdminPage() {
                   {detail.first_name||detail.name||'—'} {detail.last_name||''}
                 </div>
                 <div className="text-xs text-[#888]">
-                  {detail.job_title||detail.current_title||detail.role_hiring||detail.tier||''} {detail.company_name||detail.current_company||''}
+                  {detail.job_title||detail.current_title||detail.role_hiring||''}{detail.company_name||detail.current_company ? ` at ${detail.company_name||detail.current_company}` : ''}
                 </div>
               </div>
             </div>
+
+            {/* ─── LEAD STATUS PIPELINE ─── */}
+            {isLead && (
+              <div className="mb-6">
+                <div className="text-[9px] text-[#888] font-semibold tracking-wider uppercase mb-3">Status Pipeline</div>
+                <div className="flex gap-1 mb-3">
+                  {LEAD_STATUSES.filter(s => s !== 'lost').map((s, i) => (
+                    <button key={s} onClick={() => updateLeadStatus(s)} disabled={saving}
+                      className={`flex-1 py-1.5 rounded text-[9px] font-semibold tracking-wide uppercase transition-all ${
+                        detail.status === s
+                          ? 'bg-[#B8975A] text-white'
+                          : i <= currentIdx
+                            ? 'bg-[#B8975A]/20 text-[#B8975A]'
+                            : 'bg-[#F5F3EF] text-[#888] hover:bg-[#E8E5DF]'
+                      }`}>
+                      {s === 'negotiation' ? 'negot.' : s}
+                    </button>
+                  ))}
+                </div>
+                {detail.status !== 'lost' && (
+                  <button onClick={() => updateLeadStatus('lost')} disabled={saving}
+                    className="text-[10px] text-red-400 hover:text-red-600 font-medium">
+                    Mark as Lost
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Lead score */}
+            {detail.lead_score !== undefined && detail.lead_score !== null && (
+              <div className="bg-[#F5F3EF] rounded-xl p-4 mb-6 flex items-center gap-4">
+                <div className={`w-12 h-12 rounded-xl flex items-center justify-center font-mono text-lg font-bold ${
+                  detail.lead_score>=7?'bg-red-50 text-red-700':detail.lead_score>=4?'bg-amber-50 text-amber-700':'bg-gray-50 text-gray-500'
+                }`}>{detail.lead_score}</div>
+                <div>
+                  <div className="text-xs font-semibold text-[#333]">Lead Score</div>
+                  <div className="text-[10px] text-[#888]">
+                    {detail.lead_score>=7?'Hot — Contact within 2 hours':detail.lead_score>=4?'Warm — Contact within 24 hours':'Nurture — Add to sequence'}
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Score if assessment or candidate */}
             {(detail.score_overall || detail.prism_score) && (
               <div className="bg-[#0F1D35] rounded-xl p-5 mb-6">
                 <div className="text-[9px] text-[#B8975A]/50 tracking-wider uppercase mb-2">Prism Score</div>
-                <div className="font-display text-3xl text-white font-bold mb-3">{(detail.score_overall || detail.prism_score)?.toFixed?.(1) || detail.score_overall || detail.prism_score}/5.0</div>
+                <div className="font-display text-3xl text-white font-bold mb-3">{Number(detail.score_overall||detail.prism_score).toFixed(1)}/5.0</div>
                 {detail.score_dopamine && (
                   <div className="space-y-2">
                     {[
@@ -132,23 +295,8 @@ export default function AdminPage() {
               </div>
             )}
 
-            {/* Lead score */}
-            {detail.lead_score !== undefined && detail.lead_score !== null && (
-              <div className="bg-[#F5F3EF] rounded-xl p-4 mb-6 flex items-center gap-4">
-                <div className={`w-12 h-12 rounded-xl flex items-center justify-center font-mono text-lg font-bold ${
-                  detail.lead_score >= 7 ? 'bg-red-50 text-red-700' : detail.lead_score >= 4 ? 'bg-amber-50 text-amber-700' : 'bg-gray-50 text-gray-500'
-                }`}>{detail.lead_score}</div>
-                <div>
-                  <div className="text-xs font-semibold text-[#333]">Lead Score</div>
-                  <div className="text-[10px] text-[#888]">
-                    {detail.lead_score >= 7 ? 'Hot — Contact within 2 hours' : detail.lead_score >= 4 ? 'Warm — Contact within 24 hours' : 'Nurture — Add to sequence'}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* All fields */}
-            <div className="bg-[#F5F3EF] rounded-xl p-5 mb-6">
+            {/* Contact */}
+            <div className="bg-[#F5F3EF] rounded-xl p-5 mb-4">
               <div className="text-[9px] text-[#888] font-semibold tracking-wider uppercase mb-3">Contact</div>
               <Field label="Email" value={detail.email}/>
               <Field label="Phone" value={detail.phone}/>
@@ -156,64 +304,125 @@ export default function AdminPage() {
               <Field label="Location" value={detail.location}/>
             </div>
 
-            <div className="bg-[#F5F3EF] rounded-xl p-5 mb-6">
+            {/* Professional */}
+            <div className="bg-[#F5F3EF] rounded-xl p-5 mb-4">
               <div className="text-[9px] text-[#888] font-semibold tracking-wider uppercase mb-3">Professional</div>
-              <Field label="Job Title" value={detail.job_title||detail.current_title||detail.role_hiring}/>
+              <Field label="Title" value={detail.job_title||detail.current_title||detail.role_hiring}/>
               <Field label="Company" value={detail.company_name||detail.current_company}/>
               <Field label="Industry" value={detail.industry}/>
               <Field label="Seniority" value={detail.seniority}/>
-              <Field label="Experience" value={detail.years_experience||detail.experience}/>
-              <Field label="Qualification" value={detail.qualification}/>
               <Field label="Company Size" value={detail.company_size}/>
             </div>
 
-            {/* Lead-specific fields */}
-            {detailType === 'Lead' && (
-              <div className="bg-[#F5F3EF] rounded-xl p-5 mb-6">
+            {/* Hiring context (leads) */}
+            {isLead && (detail.role_hiring || detail.urgency || detail.challenge) && (
+              <div className="bg-[#F5F3EF] rounded-xl p-5 mb-4">
                 <div className="text-[9px] text-[#888] font-semibold tracking-wider uppercase mb-3">Hiring Context</div>
                 <Field label="Role Hiring" value={detail.role_hiring}/>
                 <Field label="Urgency" value={detail.urgency}/>
                 <Field label="Challenge" value={detail.challenge}/>
                 <Field label="Source" value={detail.source}/>
                 <Field label="Tool Used" value={detail.tool_used}/>
-                <Field label="Status" value={detail.status}/>
               </div>
             )}
 
-            {/* Assessment-specific */}
+            {/* Assessment details */}
             {detailType === 'Assessment' && (
-              <div className="bg-[#F5F3EF] rounded-xl p-5 mb-6">
-                <div className="text-[9px] text-[#888] font-semibold tracking-wider uppercase mb-3">Assessment Details</div>
+              <div className="bg-[#F5F3EF] rounded-xl p-5 mb-4">
+                <div className="text-[9px] text-[#888] font-semibold tracking-wider uppercase mb-3">Assessment</div>
                 <Field label="Tier" value={detail.tier}/>
-                <Field label="Questions Answered" value={detail.questions_answered}/>
-                <Field label="Duration" value={detail.duration_seconds ? `${Math.round(detail.duration_seconds/60)} minutes` : null}/>
+                <Field label="Questions" value={detail.questions_answered}/>
+                <Field label="Duration" value={detail.duration_seconds ? `${Math.round(detail.duration_seconds/60)} min` : null}/>
                 <Field label="Completed" value={detail.completed_at ? new Date(detail.completed_at).toLocaleString('en-IE') : null}/>
                 <Field label="Valid" value={detail.validity_flag ? 'Yes' : 'Flagged'}/>
               </div>
             )}
 
-            <div className="text-[9px] text-[#888] mt-4">
+            {/* ─── NEXT ACTION (Leads) ─── */}
+            {isLead && (
+              <div className="bg-[#F5F3EF] rounded-xl p-5 mb-4">
+                <div className="text-[9px] text-[#888] font-semibold tracking-wider uppercase mb-3">Next Action</div>
+                <input value={nextAction} onChange={e => setNextAction(e.target.value)} placeholder="e.g. Call to discuss CFO search requirements"
+                  className="w-full px-3 py-2 rounded-lg border border-[#E8E5DF] text-sm mb-2 outline-none focus:border-[#B8975A] bg-white"/>
+                <div className="flex gap-2">
+                  <input type="date" value={nextDate} onChange={e => setNextDate(e.target.value)}
+                    className="flex-1 px-3 py-2 rounded-lg border border-[#E8E5DF] text-sm outline-none focus:border-[#B8975A] bg-white"/>
+                  <button onClick={saveNextAction} disabled={saving}
+                    className="px-4 py-2 bg-[#B8975A] text-white rounded-lg text-xs font-medium hover:bg-[#96793F] disabled:opacity-40">
+                    Save
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* ─── NOTES ─── */}
+            {isLead && (
+              <div className="bg-[#F5F3EF] rounded-xl p-5 mb-4">
+                <div className="text-[9px] text-[#888] font-semibold tracking-wider uppercase mb-3">Notes</div>
+                {detail.notes && (
+                  <div className="text-xs text-[#333] leading-relaxed whitespace-pre-wrap mb-3 p-3 bg-white rounded-lg border border-[#E8E5DF]">
+                    {detail.notes}
+                  </div>
+                )}
+                <div className="flex gap-2">
+                  <input value={noteText} onChange={e => setNoteText(e.target.value)} placeholder="Add a note..."
+                    onKeyDown={e => { if (e.key === 'Enter' && noteText.trim()) saveNote(); }}
+                    className="flex-1 px-3 py-2 rounded-lg border border-[#E8E5DF] text-sm outline-none focus:border-[#B8975A] bg-white"/>
+                  <button onClick={saveNote} disabled={saving || !noteText.trim()}
+                    className="px-4 py-2 bg-[#B8975A] text-white rounded-lg text-xs font-medium hover:bg-[#96793F] disabled:opacity-40">
+                    Add
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Timestamp */}
+            <div className="text-[9px] text-[#888] mt-2 mb-4">
               Created: {detail.created_at ? new Date(detail.created_at).toLocaleString('en-IE') : '—'}
+              {detail.converted_at && <span> · Converted: {new Date(detail.converted_at).toLocaleString('en-IE')}</span>}
             </div>
 
-            {/* Actions */}
-            <div className="flex gap-2 mt-6 flex-wrap">
+            {/* ─── ACTION BUTTONS ─── */}
+            <div className="flex gap-2 flex-wrap">
               {detail.email && (
-                <a href={`mailto:${detail.email}`} className="px-4 py-2 bg-[#B8975A] text-white rounded-lg text-xs font-medium hover:bg-[#96793F] transition-colors">
+                <a href={`mailto:${detail.email}`} className="px-4 py-2.5 bg-[#B8975A] text-white rounded-lg text-xs font-medium hover:bg-[#96793F]">
                   Email
                 </a>
               )}
               {detail.phone && (
-                <a href={`tel:${detail.phone}`} className="px-4 py-2 border border-[#E8E5DF] rounded-lg text-xs font-medium text-[#333] hover:bg-[#F5F3EF] transition-colors">
+                <a href={`tel:${detail.phone}`} className="px-4 py-2.5 border border-[#E8E5DF] rounded-lg text-xs font-medium text-[#333] hover:bg-[#F5F3EF]">
                   Call
                 </a>
               )}
               {detail.linkedin_url && (
-                <a href={detail.linkedin_url} target="_blank" className="px-4 py-2 border border-[#E8E5DF] rounded-lg text-xs font-medium text-[#333] hover:bg-[#F5F3EF] transition-colors">
+                <a href={detail.linkedin_url.startsWith('http') ? detail.linkedin_url : `https://${detail.linkedin_url}`} target="_blank"
+                  className="px-4 py-2.5 border border-[#E8E5DF] rounded-lg text-xs font-medium text-[#333] hover:bg-[#F5F3EF]">
                   LinkedIn
                 </a>
               )}
             </div>
+
+            {/* ─── CONVERSION BUTTONS ─── */}
+            {isLead && detail.status !== 'won' && (
+              <div className="mt-6 pt-5 border-t border-[#E8E5DF]">
+                <div className="text-[9px] text-[#888] font-semibold tracking-wider uppercase mb-3">Convert Lead</div>
+                <div className="flex gap-2">
+                  {isCompany && !detail.converted_to_org_id && (
+                    <button onClick={convertToCompany} disabled={saving}
+                      className="flex-1 px-4 py-2.5 bg-[#0F1D35] text-white rounded-lg text-xs font-medium hover:bg-[#1A2D4D] disabled:opacity-40">
+                      Convert to Company
+                    </button>
+                  )}
+                  <button onClick={convertToCandidate} disabled={saving}
+                    className="flex-1 px-4 py-2.5 border border-[#0F1D35] text-[#0F1D35] rounded-lg text-xs font-medium hover:bg-[#F5F3EF] disabled:opacity-40">
+                    Convert to Candidate
+                  </button>
+                </div>
+                {detail.converted_to_org_id && (
+                  <p className="text-[10px] text-green-600 mt-2 font-medium">Already converted to company</p>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </>
@@ -268,7 +477,6 @@ export default function AdminPage() {
             <div className="flex items-center justify-center h-64 text-[#888]">Loading...</div>
           ) : (
             <>
-              {/* OVERVIEW */}
               {pg==='overview'&&(
                 <div>
                   <h2 className="font-display text-xl font-bold text-[#0F1D35] mb-5">Command Centre</h2>
@@ -283,44 +491,49 @@ export default function AdminPage() {
                     <h3 className="text-sm font-bold text-[#0F1D35] mb-3">Recent Activity</h3>
                     {data.activities.length===0?(
                       <p className="text-xs text-[#888] py-8 text-center">No activity yet.</p>
-                    ):data.activities.slice(0,12).map((a:any)=>(
+                    ):data.activities.slice(0,15).map((a:any)=>(
                       <div key={a.id} className="flex gap-2.5 py-2.5 border-b border-[#F5F3EF] last:border-0">
                         <div className="w-1.5 h-1.5 rounded-full bg-[#B8975A] mt-1.5 flex-shrink-0"/>
-                        <div className="flex-1 min-w-0">
-                          <div className="text-xs text-[#333] truncate">{a.description}</div>
-                          <div className="text-[10px] text-[#888]">{timeAgo(a.created_at)}</div>
-                        </div>
+                        <div className="flex-1 min-w-0"><div className="text-xs text-[#333] truncate">{a.description}</div><div className="text-[10px] text-[#888]">{timeAgo(a.created_at)}</div></div>
                       </div>
                     ))}
                   </div>
                 </div>
               )}
 
-              {/* LEADS */}
               {pg==='leads'&&(
                 <div>
-                  <h2 className="font-display text-xl font-bold text-[#0F1D35] mb-5">Leads <span className="text-sm font-normal text-[#888]">({data.leads.length})</span></h2>
-                  {data.leads.length===0?(
+                  <div className="flex justify-between items-end mb-5">
+                    <h2 className="font-display text-xl font-bold text-[#0F1D35]">Leads <span className="text-sm font-normal text-[#888]">({filteredLeads.length})</span></h2>
+                    <div className="flex gap-1 bg-white rounded-lg border border-[#E8E5DF] p-0.5">
+                      {([['all','All'],['individual','Individual'],['company','Company']] as const).map(([k,l]) => (
+                        <button key={k} onClick={()=>setLeadFilter(k)}
+                          className={`px-3 py-1.5 rounded-md text-[10px] font-semibold transition-colors ${leadFilter===k?'bg-[#B8975A]/10 text-[#B8975A]':'text-[#888] hover:bg-[#F5F3EF]'}`}>
+                          {l}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  {filteredLeads.length===0?(
                     <div className="bg-white rounded-xl p-12 border border-[#E8E5DF] text-center">
-                      <p className="text-sm text-[#888] mb-2">No leads yet</p>
-                      <p className="text-xs text-[#888]">Leads appear when employers use the hiring tools or individuals complete assessments.</p>
+                      <p className="text-xs text-[#888]">No leads match this filter.</p>
                     </div>
                   ):(
                     <div className="bg-white rounded-xl border border-[#E8E5DF] overflow-hidden">
-                      {data.leads.map((l:any)=>(
+                      {filteredLeads.map((l:any)=>(
                         <div key={l.id} onClick={()=>openDetail(l,'Lead')} className="flex items-center gap-3 px-5 py-3.5 border-b border-[#F5F3EF] hover:bg-[#FAFAF8] cursor-pointer transition-colors">
                           <div className={`w-9 h-9 rounded-lg flex items-center justify-center font-mono text-xs font-bold ${l.lead_score>=7?'bg-red-50 text-red-700':l.lead_score>=4?'bg-amber-50 text-amber-700':'bg-gray-50 text-gray-500'}`}>
                             {l.lead_score}
                           </div>
                           <div className="flex-1 min-w-0">
                             <div className="text-sm font-semibold text-[#0F1D35]">{l.first_name} {l.last_name||''}</div>
-                            <div className="text-[11px] text-[#888]">{l.company_name||'—'} · {l.industry||'—'} · {l.tool_used||'website'}</div>
+                            <div className="text-[11px] text-[#888]">{l.company_name||'Individual'} · {l.industry||'—'} · {l.tool_used||'website'}</div>
                           </div>
                           <div className="text-right flex-shrink-0">
-                            <Pill c={l.status==='new'?'red':l.status==='contacted'?'blue':'green'}>{l.status}</Pill>
+                            <Pill c={STATUS_COLORS[l.status]||'gold'}>{l.status}</Pill>
                             <div className="text-[9px] text-[#888] mt-1">{timeAgo(l.created_at)}</div>
                           </div>
-                          <span className="text-[#888] text-xs ml-2">→</span>
+                          <span className="text-[#ccc] text-xs ml-1">→</span>
                         </div>
                       ))}
                     </div>
@@ -328,27 +541,19 @@ export default function AdminPage() {
                 </div>
               )}
 
-              {/* CANDIDATES */}
               {pg==='candidates'&&(
                 <div>
                   <h2 className="font-display text-xl font-bold text-[#0F1D35] mb-5">Candidates <span className="text-sm font-normal text-[#888]">({data.candidates.length})</span></h2>
                   {data.candidates.length===0?(
-                    <div className="bg-white rounded-xl p-12 border border-[#E8E5DF] text-center">
-                      <p className="text-xs text-[#888]">Candidates are created when someone completes an assessment with their profile details.</p>
-                    </div>
+                    <div className="bg-white rounded-xl p-12 border border-[#E8E5DF] text-center"><p className="text-xs text-[#888]">Candidates appear when assessments are completed or leads are converted.</p></div>
                   ):(
                     <div className="bg-white rounded-xl border border-[#E8E5DF] overflow-hidden">
                       {data.candidates.map((c:any)=>(
-                        <div key={c.id} onClick={()=>openDetail(c,'Candidate')} className="flex items-center gap-3 px-5 py-3.5 border-b border-[#F5F3EF] hover:bg-[#FAFAF8] cursor-pointer transition-colors">
-                          <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-[#B8975A] to-[#96793F] flex items-center justify-center text-white text-[11px] font-bold">
-                            {c.first_name?.[0]||''}{c.last_name?.[0]||''}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="text-sm font-semibold text-[#0F1D35]">{c.first_name} {c.last_name}</div>
-                            <div className="text-[11px] text-[#888]">{c.current_title||'—'} · {c.current_company||'—'} · {c.industry||'—'}</div>
-                          </div>
+                        <div key={c.id} onClick={()=>openDetail(c,'Candidate')} className="flex items-center gap-3 px-5 py-3.5 border-b border-[#F5F3EF] hover:bg-[#FAFAF8] cursor-pointer">
+                          <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-[#B8975A] to-[#96793F] flex items-center justify-center text-white text-[11px] font-bold">{c.first_name?.[0]||''}{c.last_name?.[0]||''}</div>
+                          <div className="flex-1 min-w-0"><div className="text-sm font-semibold text-[#0F1D35]">{c.first_name} {c.last_name}</div><div className="text-[11px] text-[#888]">{c.current_title||'—'} · {c.current_company||'—'}</div></div>
                           {c.prism_score&&<span className="font-mono text-sm font-bold text-[#B8975A]">{Number(c.prism_score).toFixed(1)}</span>}
-                          <span className="text-[#888] text-xs ml-2">→</span>
+                          <span className="text-[#ccc] text-xs ml-1">→</span>
                         </div>
                       ))}
                     </div>
@@ -356,28 +561,20 @@ export default function AdminPage() {
                 </div>
               )}
 
-              {/* ASSESSMENTS */}
               {pg==='assessments'&&(
                 <div>
                   <h2 className="font-display text-xl font-bold text-[#0F1D35] mb-5">Assessments <span className="text-sm font-normal text-[#888]">({data.assessments.length})</span></h2>
                   {data.assessments.length===0?(
-                    <div className="bg-white rounded-xl p-12 border border-[#E8E5DF] text-center">
-                      <p className="text-xs text-[#888]">No assessments completed yet.</p>
-                    </div>
+                    <div className="bg-white rounded-xl p-12 border border-[#E8E5DF] text-center"><p className="text-xs text-[#888]">No assessments yet.</p></div>
                   ):(
                     <div className="bg-white rounded-xl border border-[#E8E5DF] overflow-hidden">
                       {data.assessments.map((a:any)=>(
-                        <div key={a.id} onClick={()=>openDetail(a,'Assessment')} className="flex items-center gap-3 px-5 py-3.5 border-b border-[#F5F3EF] hover:bg-[#FAFAF8] cursor-pointer transition-colors">
-                          <div className="w-9 h-9 rounded-lg bg-[#F5F3EF] flex items-center justify-center text-[11px] font-bold text-[#0F1D35]">
-                            {a.first_name?.[0]||'?'}{a.last_name?.[0]||''}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="text-sm font-semibold text-[#0F1D35]">{a.first_name||'Anonymous'} {a.last_name||''}</div>
-                            <div className="text-[11px] text-[#888]">{a.email||'No email'} · {a.tier} · {timeAgo(a.completed_at||a.created_at)}</div>
-                          </div>
-                          <span className="font-mono text-sm font-bold text-[#B8975A]">{a.score_overall ? Number(a.score_overall).toFixed(1) : '—'}</span>
+                        <div key={a.id} onClick={()=>openDetail(a,'Assessment')} className="flex items-center gap-3 px-5 py-3.5 border-b border-[#F5F3EF] hover:bg-[#FAFAF8] cursor-pointer">
+                          <div className="w-9 h-9 rounded-lg bg-[#F5F3EF] flex items-center justify-center text-[11px] font-bold text-[#0F1D35]">{a.first_name?.[0]||'?'}{a.last_name?.[0]||''}</div>
+                          <div className="flex-1 min-w-0"><div className="text-sm font-semibold text-[#0F1D35]">{a.first_name||'Anonymous'} {a.last_name||''}</div><div className="text-[11px] text-[#888]">{a.email||'—'} · {a.tier} · {timeAgo(a.completed_at||a.created_at)}</div></div>
+                          <span className="font-mono text-sm font-bold text-[#B8975A]">{a.score_overall?Number(a.score_overall).toFixed(1):'—'}</span>
                           <Pill c="green">Complete</Pill>
-                          <span className="text-[#888] text-xs ml-1">→</span>
+                          <span className="text-[#ccc] text-xs ml-1">→</span>
                         </div>
                       ))}
                     </div>
@@ -385,19 +582,18 @@ export default function AdminPage() {
                 </div>
               )}
 
-              {/* COMPANIES */}
               {pg==='companies'&&(
                 <div>
                   <h2 className="font-display text-xl font-bold text-[#0F1D35] mb-5">Companies <span className="text-sm font-normal text-[#888]">({data.orgs.length})</span></h2>
                   {data.orgs.length===0?(
-                    <div className="bg-white rounded-xl p-12 border border-[#E8E5DF] text-center"><p className="text-xs text-[#888]">No companies yet.</p></div>
+                    <div className="bg-white rounded-xl p-12 border border-[#E8E5DF] text-center"><p className="text-xs text-[#888]">No companies yet. Convert a lead to create one.</p></div>
                   ):(
                     <div className="bg-white rounded-xl border border-[#E8E5DF] overflow-hidden">
                       {data.orgs.map((o:any)=>(
                         <div key={o.id} onClick={()=>openDetail(o,'Company')} className="flex items-center gap-3 px-5 py-3.5 border-b border-[#F5F3EF] hover:bg-[#FAFAF8] cursor-pointer">
                           <div className="flex-1"><div className="text-sm font-semibold text-[#0F1D35]">{o.name}</div><div className="text-[11px] text-[#888]">{o.industry||'—'}</div></div>
                           <Pill c={o.tier==='retained'?'gold':'blue'}>{o.tier||'prospect'}</Pill>
-                          <span className="text-[#888] text-xs">→</span>
+                          <span className="text-[#ccc] text-xs">→</span>
                         </div>
                       ))}
                     </div>
@@ -405,59 +601,29 @@ export default function AdminPage() {
                 </div>
               )}
 
-              {/* SEARCHES */}
               {pg==='searches'&&(
                 <div>
                   <h2 className="font-display text-xl font-bold text-[#0F1D35] mb-5">Searches <span className="text-sm font-normal text-[#888]">({data.searches.length})</span></h2>
-                  {data.searches.length===0?(
-                    <div className="bg-white rounded-xl p-12 border border-[#E8E5DF] text-center"><p className="text-xs text-[#888]">No active searches.</p></div>
-                  ):(
-                    <div className="bg-white rounded-xl border border-[#E8E5DF] overflow-hidden">
-                      {data.searches.map((s:any)=>(
-                        <div key={s.id} className="flex items-center gap-3 px-5 py-3.5 border-b border-[#F5F3EF]">
-                          <div className="flex-1"><div className="text-sm font-semibold text-[#0F1D35]">{s.role_title}</div><div className="text-[11px] text-[#888]">{s.reference} · {s.search_type}</div></div>
-                          <Pill c={s.status==='placed'?'green':s.status==='shortlist'?'gold':'blue'}>{s.status}</Pill>
-                        </div>
-                      ))}
-                    </div>
+                  {data.searches.length===0?(<div className="bg-white rounded-xl p-12 border border-[#E8E5DF] text-center"><p className="text-xs text-[#888]">No active searches.</p></div>):(
+                    <div className="bg-white rounded-xl border border-[#E8E5DF] overflow-hidden">{data.searches.map((s:any)=>(<div key={s.id} className="flex items-center gap-3 px-5 py-3.5 border-b border-[#F5F3EF]"><div className="flex-1"><div className="text-sm font-semibold text-[#0F1D35]">{s.role_title}</div><div className="text-[11px] text-[#888]">{s.reference} · {s.search_type}</div></div><Pill c={s.status==='placed'?'green':'blue'}>{s.status}</Pill></div>))}</div>
                   )}
                 </div>
               )}
 
-              {/* INVOICES */}
               {pg==='invoices'&&(
                 <div>
                   <h2 className="font-display text-xl font-bold text-[#0F1D35] mb-5">Invoices <span className="text-sm font-normal text-[#888]">({data.invoices.length})</span></h2>
-                  {data.invoices.length===0?(
-                    <div className="bg-white rounded-xl p-12 border border-[#E8E5DF] text-center"><p className="text-xs text-[#888]">No invoices yet.</p></div>
-                  ):(
-                    <div className="bg-white rounded-xl border border-[#E8E5DF] overflow-hidden">
-                      {data.invoices.map((inv:any)=>(
-                        <div key={inv.id} className="flex items-center gap-3 px-5 py-3.5 border-b border-[#F5F3EF]">
-                          <div className="flex-1"><div className="text-sm font-semibold text-[#0F1D35]">{inv.invoice_number}</div><div className="text-[11px] text-[#888]">{inv.description}</div></div>
-                          <span className="font-mono text-xs font-bold text-[#B8975A]">€{((inv.total_cents||0)/100).toLocaleString()}</span>
-                          <Pill c={inv.status==='paid'?'green':inv.status==='overdue'?'red':'amber'}>{inv.status}</Pill>
-                        </div>
-                      ))}
-                    </div>
+                  {data.invoices.length===0?(<div className="bg-white rounded-xl p-12 border border-[#E8E5DF] text-center"><p className="text-xs text-[#888]">No invoices yet.</p></div>):(
+                    <div className="bg-white rounded-xl border border-[#E8E5DF] overflow-hidden">{data.invoices.map((inv:any)=>(<div key={inv.id} className="flex items-center gap-3 px-5 py-3.5 border-b border-[#F5F3EF]"><div className="flex-1"><div className="text-sm font-semibold text-[#0F1D35]">{inv.invoice_number}</div><div className="text-[11px] text-[#888]">{inv.description}</div></div><span className="font-mono text-xs font-bold text-[#B8975A]">€{((inv.total_cents||0)/100).toLocaleString()}</span><Pill c={inv.status==='paid'?'green':inv.status==='overdue'?'red':'amber'}>{inv.status}</Pill></div>))}</div>
                   )}
                 </div>
               )}
 
-              {/* ACTIVITY */}
               {pg==='activity'&&(
                 <div>
                   <h2 className="font-display text-xl font-bold text-[#0F1D35] mb-5">Activity Feed</h2>
                   <div className="bg-white rounded-xl p-5 border border-[#E8E5DF]">
-                    {data.activities.map((a:any)=>(
-                      <div key={a.id} className="flex gap-3 py-3 border-b border-[#F5F3EF] last:border-0">
-                        <div className="w-1.5 h-1.5 rounded-full bg-[#B8975A] mt-1.5 flex-shrink-0"/>
-                        <div>
-                          <div className="text-xs text-[#333]">{a.description}</div>
-                          <div className="text-[10px] text-[#888] mt-0.5">{timeAgo(a.created_at)} · {a.type?.replace(/_/g,' ')}</div>
-                        </div>
-                      </div>
-                    ))}
+                    {data.activities.map((a:any)=>(<div key={a.id} className="flex gap-3 py-3 border-b border-[#F5F3EF] last:border-0"><div className="w-1.5 h-1.5 rounded-full bg-[#B8975A] mt-1.5 flex-shrink-0"/><div><div className="text-xs text-[#333]">{a.description}</div><div className="text-[10px] text-[#888] mt-0.5">{timeAgo(a.created_at)} · {a.type?.replace(/_/g,' ')}</div></div></div>))}
                   </div>
                 </div>
               )}
