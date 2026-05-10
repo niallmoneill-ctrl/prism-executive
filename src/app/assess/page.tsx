@@ -74,7 +74,7 @@ export default function AssessPage() {
       const res = await fetch(`${FUNCTIONS_URL}/score-assessment`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+        body: JSON.stringify({ firstName, lastName, email, phone, industry, seniority, role, company, location, linkedin,
           responses, tier: 'explorer',
           durationSeconds: Math.round((Date.now() - startTime) / 1000),
         }),
@@ -84,7 +84,7 @@ export default function AssessPage() {
       await fetch(`${FUNCTIONS_URL}/lead-capture`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+        body: JSON.stringify({ firstName, lastName, email, phone, industry, seniority, role, company, location, linkedin,
           firstName, lastName, email, phone,
           company, industry, title: role,
           toolUsed: 'assessment', intent: 'development',
