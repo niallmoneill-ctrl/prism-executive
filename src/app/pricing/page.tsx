@@ -3,7 +3,7 @@ import Link from 'next/link';
 
 const TIERS = [
   { name:'EXPLORER', price:'Free', sub:'', features:['12-item assessment','Summary behaviour map','Top 3 strengths','2-page report'], pop:false, cta:'Start Free', href:'/assess' },
-  { name:'PROFESSIONAL', price:'€49', sub:'/assessment', features:['Full 80-item assessment','Natural + Adapted maps','8 sub-dimension scores','Gap analysis','Communication guide','Decision-making profile','Leadership style','15-page report','Development plan'], pop:true, cta:'Get Started', href:'/assess' },
+  { name:'PROFESSIONAL', price:'€49', sub:'/assessment', features:['Full 80-item assessment','Natural + Adapted maps','8 sub-dimension scores','Gap analysis','Communication guide','Decision-making profile','Leadership style','15-page report','Development plan'], pop:true, cta:'Get Started', href:'https://calendly.com/prismexecutive/consultation' },
   { name:'ENTERPRISE', price:'From €2,500', sub:'/year', features:['Unlimited assessments','Team diagnostics','360° feedback','Job benchmarking','Candidate match scoring','API & HR integration','Dedicated account manager'], pop:false, cta:'Contact Us', href:'mailto:orla.brennan@prismexecutive.ie' },
   { name:'PRACTITIONER', price:'€1,500', sub:'/certification', features:['Certification training','Practitioner licence','All instruments','Debrief training','CPD credits','Co-branding rights','10 assessment credits'], pop:false, cta:'Apply', href:'mailto:orla.brennan@prismexecutive.ie' },
 ];
