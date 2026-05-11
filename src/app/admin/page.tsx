@@ -147,7 +147,7 @@ export default function AdminPage() {
     {id:'overview',label:'Overview',e:'◆'},{id:'leads',label:'Leads',e:'◎'},
     {id:'companies',label:'Companies',e:'◫'},{id:'candidates',label:'Candidates',e:'◉'},
     {id:'searches',label:'Searches',e:'◇'},{id:'assessments',label:'Assessments',e:'◈'},
-    {id:'invoices',label:'Invoices',e:'▤'},{id:'activity',label:'Activity',e:'▥'},{id:'skills',label:'Skills',e:'◑'},
+    {id:'invoices',label:'Invoices',e:'▤'},{id:'activity',label:'Activity',e:'▥'},{id:'skills',label:'Skills',e:'◑'},{id:'skills',label:'Skills',e:'◑'},
   ];
 
   const timeAgo = (d: string) => {
