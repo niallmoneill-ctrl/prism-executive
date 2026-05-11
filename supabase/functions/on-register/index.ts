@@ -1,6 +1,6 @@
 // on-register
 // -----------------------------------------------------------------------------
-// Centralised post-registration / invite hook. Two entry shapes are supported:
+// Centralised post-registration / invite hook. Two entry shapes:
 //
 //   1. event: "staff_invite"
 //      Called by /admin/staff/invite immediately after a staff_invites row is
@@ -9,13 +9,14 @@
 //   2. event: "user_registered"
 //      Called from the auth callback (or a Supabase Auth Hook) when a new
 //      user finishes signing up. If a matching staff_invites row exists for
-//      that email, the user's profile.role is upgraded to the invited role
-//      and the invite is marked accepted. Non-staff registrations are a
-//      no-op so this hook can be wired indiscriminately.
+//      that email:
+//        - ensures a profiles row exists,
+//        - creates a staff row (profile_id, staff_role, title, department),
+//        - marks the invite accepted.
+//      Non-staff registrations are a no-op so this hook can be wired
+//      indiscriminately.
 //
-// The function deliberately uses anon-key Supabase access for reads/writes
-// scoped by RLS, except for the privileged profile.role + invite upgrade,
-// which uses the service role key.
+// Service role is used so RLS doesn't block the cross-table writes.
 // -----------------------------------------------------------------------------
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
@@ -61,16 +62,22 @@ Deno.serve(async (req: Request) => {
       const {
         email,
         firstName,
+        staffRole,
+        // Backwards-compat: older callers sent `role` before we aligned
+        // with the staff_role column.
         role,
         acceptUrl,
+        title,
+        department,
         message,
         invitedBy,
         inviteId,
       } = body;
+      const resolvedRole = staffRole || role;
 
-      if (!email || !role || !acceptUrl) {
+      if (!email || !resolvedRole || !acceptUrl) {
         return new Response(
-          JSON.stringify({ error: "email, role and acceptUrl are required" }),
+          JSON.stringify({ error: "email, staffRole and acceptUrl are required" }),
           { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } },
         );
       }
@@ -78,20 +85,20 @@ Deno.serve(async (req: Request) => {
       await sendEmail("staff_invite", {
         email,
         firstName: firstName || "there",
-        role,
+        role: resolvedRole,
+        title:      title      || null,
+        department: department || null,
         acceptUrl,
-        message: message || null,
+        message:   message   || null,
         invitedBy: invitedBy || null,
       });
 
-      // Activity log — best effort. If the activities table or its columns
-      // differ, we still consider the invite send successful.
       try {
         await admin.from("activities").insert({
           type: "staff_invite_sent",
-          description: `Staff invite sent to ${email} (${role})`,
+          description: `Staff invite sent to ${email} (${resolvedRole})`,
           actor_id: invitedBy || null,
-          metadata: { inviteId: inviteId || null, role, email },
+          metadata: { inviteId: inviteId || null, role: resolvedRole, email, title, department },
         });
       } catch (e) {
         console.warn("on-register: activity log insert skipped:", e);
@@ -113,18 +120,18 @@ Deno.serve(async (req: Request) => {
         );
       }
 
-      // Match a pending invite by email and (optionally) token.
+      // Find a pending invite for this email (and token if provided).
       const token = body.token as string | undefined;
-      let query = admin
+      let q = admin
         .from("staff_invites")
-        .select("id, email, role, expires_at, accepted_at, token")
+        .select("id, email, staff_role, title, department, first_name, last_name, expires_at, accepted_at, token")
         .eq("email", email)
         .is("accepted_at", null)
         .order("created_at", { ascending: false })
         .limit(1);
-      if (token) query = query.eq("token", token);
+      if (token) q = q.eq("token", token);
 
-      const { data: invite } = await query.maybeSingle();
+      const { data: invite } = await q.maybeSingle();
 
       if (!invite) {
         return new Response(
@@ -133,7 +140,6 @@ Deno.serve(async (req: Request) => {
         );
       }
 
-      // Expiry check.
       if (invite.expires_at && new Date(invite.expires_at).getTime() < Date.now()) {
         return new Response(
           JSON.stringify({ ok: true, matched: true, expired: true }),
@@ -141,29 +147,62 @@ Deno.serve(async (req: Request) => {
         );
       }
 
-      await admin
-        .from("profiles")
-        .update({ role: invite.role, updated_at: new Date().toISOString() })
-        .eq("id", userId);
+      // Ensure a profile exists. Staff need profile_id to anchor the staff row.
+      await admin.from("profiles").upsert({
+        id: userId,
+        email,
+        first_name: invite.first_name || null,
+        last_name:  invite.last_name  || null,
+        role: "staff",
+        updated_at: new Date().toISOString(),
+      }, { onConflict: "id" });
+
+      // Create the staff record (idempotent — skip if it already exists).
+      const { data: existing } = await admin
+        .from("staff")
+        .select("id")
+        .eq("profile_id", userId)
+        .maybeSingle();
+
+      if (!existing) {
+        await admin.from("staff").insert({
+          profile_id: userId,
+          staff_role: invite.staff_role,
+          department: invite.department || "Operations",
+          title:      invite.title      || null,
+          status: "active",
+        });
+      } else {
+        await admin
+          .from("staff")
+          .update({
+            staff_role: invite.staff_role,
+            department: invite.department || "Operations",
+            title:      invite.title      || null,
+            status: "active",
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", existing.id);
+      }
 
       await admin
         .from("staff_invites")
-        .update({ accepted_at: new Date().toISOString(), accepted_by: userId })
+        .update({ accepted_at: new Date().toISOString() })
         .eq("id", invite.id);
 
       try {
         await admin.from("activities").insert({
           type: "staff_invite_accepted",
-          description: `Staff invite accepted by ${email} (${invite.role})`,
+          description: `Staff invite accepted by ${email} (${invite.staff_role})`,
           actor_id: userId,
-          metadata: { inviteId: invite.id, role: invite.role },
+          metadata: { inviteId: invite.id, role: invite.staff_role },
         });
       } catch (e) {
         console.warn("on-register: activity log insert skipped:", e);
       }
 
       return new Response(
-        JSON.stringify({ ok: true, matched: true, role: invite.role }),
+        JSON.stringify({ ok: true, matched: true, role: invite.staff_role }),
         { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } },
       );
     }

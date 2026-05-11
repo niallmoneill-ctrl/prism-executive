@@ -43,26 +43,36 @@ const ROLE_TONE: Record<StaffRole, string> = {
   hr: 'bg-[#4A8B6F]/15 text-[#3a6e57]',
 };
 
-interface StaffMember {
+interface StaffRow {
   id: string;
-  email: string | null;
-  first_name: string | null;
-  last_name: string | null;
-  role: string | null;
+  staff_role: StaffRole | string;
+  department: string | null;
+  title: string | null;
+  status: string | null;
   created_at: string | null;
+  profiles: {
+    id: string;
+    email: string | null;
+    first_name: string | null;
+    last_name: string | null;
+  } | null;
 }
 
 interface PendingInvite {
   id: string;
   email: string;
-  role: string;
+  first_name: string | null;
+  last_name: string | null;
+  staff_role: StaffRole | string;
+  title: string | null;
+  department: string | null;
   created_at: string | null;
   expires_at: string | null;
   accepted_at: string | null;
 }
 
 export default function AdminStaffPage() {
-  const [staff, setStaff] = useState<StaffMember[]>([]);
+  const [staff, setStaff] = useState<StaffRow[]>([]);
   const [invites, setInvites] = useState<PendingInvite[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -71,51 +81,50 @@ export default function AdminStaffPage() {
     (async () => {
       const supabase = createClient();
 
-      // Defence-in-depth: middleware already gates /admin server-side, but
-      // prerendered `'use client'` pages can be served from CDN cache, so
-      // mirror the auth + role check on the client too.
+      // Mirror the middleware: auth + staff membership. Prerendered client
+      // pages can hit Vercel cache without invoking middleware, so we
+      // re-check here.
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) { window.location.href = '/login?redirect=/admin/staff'; return; }
-      const { data: me } = await supabase
-        .from('profiles')
-        .select('role')
-        .eq('id', user.id)
-        .maybeSingle();
-      if (!me?.role || !(STAFF_ROLES as readonly string[]).includes(me.role)) {
-        window.location.href = '/account';
-        return;
-      }
 
-      const { data: members, error: membersErr } = await supabase
-        .from('profiles')
-        .select('id, email, first_name, last_name, role, created_at')
-        .in('role', STAFF_ROLES as unknown as string[])
-        .order('created_at', { ascending: true });
+      const { data: isStaff } = await supabase.rpc('is_staff', { user_id: user.id });
+      if (isStaff !== true) { window.location.href = '/account'; return; }
 
-      if (membersErr) {
-        setError(membersErr.message);
+      const [staffRes, invitesRes] = await Promise.all([
+        supabase
+          .from('staff')
+          .select('id, staff_role, department, title, status, created_at, profiles:profile_id (id, email, first_name, last_name)')
+          .order('created_at', { ascending: true }),
+        supabase
+          .from('staff_invites')
+          .select('id, email, first_name, last_name, staff_role, title, department, created_at, expires_at, accepted_at')
+          .is('accepted_at', null)
+          .order('created_at', { ascending: false }),
+      ]);
+
+      if (staffRes.error) {
+        setError(staffRes.error.message);
       } else {
-        setStaff((members || []) as StaffMember[]);
+        // The Supabase JS client types the joined relation as an array;
+        // normalise to a single object since profile_id is a 1:1 join.
+        const rows = (staffRes.data || []).map((r: any) => ({
+          ...r,
+          profiles: Array.isArray(r.profiles) ? r.profiles[0] : r.profiles,
+        })) as StaffRow[];
+        setStaff(rows);
       }
 
-      // Pending invites (best-effort — table may have different columns).
-      const { data: pending } = await supabase
-        .from('staff_invites')
-        .select('id, email, role, created_at, expires_at, accepted_at')
-        .is('accepted_at', null)
-        .order('created_at', { ascending: false });
-      if (pending) setInvites(pending as PendingInvite[]);
+      if (invitesRes.data) setInvites(invitesRes.data as PendingInvite[]);
 
       setLoading(false);
     })();
   }, []);
 
-  const inviteRoleCount = (role: StaffRole) =>
-    staff.filter(s => s.role === role).length;
+  const roleCount = (role: StaffRole) =>
+    staff.filter(s => s.staff_role === role).length;
 
   return (
     <div className="min-h-screen bg-[#F5F3EF]">
-      {/* Top bar */}
       <nav className="bg-[#1A1A1A] px-6 h-14 flex items-center justify-between sticky top-0 z-40">
         <Link href="/admin" className="flex items-center gap-3">
           <div className="w-9 h-9 border border-[#B8975A]/40 rounded flex items-center justify-center font-display text-xl font-semibold text-[#B8975A]">P</div>
@@ -126,7 +135,6 @@ export default function AdminStaffPage() {
       </nav>
 
       <div className="max-w-6xl mx-auto px-6 py-10">
-        {/* Header */}
         <div className="flex items-end justify-between mb-8">
           <div>
             <p className="text-[10px] tracking-[0.3em] uppercase text-[#888] mb-2">Team Management</p>
@@ -150,13 +158,12 @@ export default function AdminStaffPage() {
           </div>
         )}
 
-        {/* Role distribution */}
         {!loading && staff.length > 0 && (
           <div className="bg-white rounded-xl border border-[#E8E5DF] p-6 mb-8">
             <p className="text-[10px] tracking-[0.25em] uppercase text-[#888] font-medium mb-4">Role Distribution</p>
             <div className="flex flex-wrap gap-2">
               {STAFF_ROLES.map(r => {
-                const count = inviteRoleCount(r);
+                const count = roleCount(r);
                 if (count === 0) return null;
                 return (
                   <span key={r} className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-[11px] font-medium ${ROLE_TONE[r]}`}>
@@ -169,7 +176,6 @@ export default function AdminStaffPage() {
           </div>
         )}
 
-        {/* Team list */}
         <div className="bg-white rounded-xl border border-[#E8E5DF] overflow-hidden mb-8">
           <div className="px-6 py-4 border-b border-[#E8E5DF] flex items-center justify-between">
             <h2 className="font-display text-lg text-[#1A1A1A]">Team Members</h2>
@@ -186,9 +192,10 @@ export default function AdminStaffPage() {
           ) : (
             <div>
               {staff.map(member => {
-                const role = (member.role || '') as StaffRole;
-                const initials = `${(member.first_name?.[0] || '?').toUpperCase()}${(member.last_name?.[0] || '').toUpperCase()}`;
-                const fullName = [member.first_name, member.last_name].filter(Boolean).join(' ') || member.email || 'Unnamed staff';
+                const role = (member.staff_role || '') as StaffRole;
+                const profile = member.profiles;
+                const initials = `${(profile?.first_name?.[0] || '?').toUpperCase()}${(profile?.last_name?.[0] || '').toUpperCase()}`;
+                const fullName = [profile?.first_name, profile?.last_name].filter(Boolean).join(' ') || profile?.email || 'Unnamed staff';
                 return (
                   <div key={member.id} className="flex items-center gap-4 px-6 py-4 border-b border-[#F5F3EF] last:border-0">
                     <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-[#B8975A] to-[#96793F] flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
@@ -196,15 +203,19 @@ export default function AdminStaffPage() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-[#1A1A1A] truncate">{fullName}</p>
-                      <p className="text-xs text-[#888] truncate">{member.email || '—'}</p>
+                      <p className="text-xs text-[#888] truncate">
+                        {profile?.email || '—'}
+                        {member.title ? ` · ${member.title}` : ''}
+                        {member.department ? ` · ${member.department}` : ''}
+                      </p>
                     </div>
-                    {STAFF_ROLES.includes(role) ? (
+                    {(STAFF_ROLES as readonly string[]).includes(role) ? (
                       <span className={`text-[10px] tracking-widest uppercase font-semibold px-3 py-1 rounded-full ${ROLE_TONE[role]}`}>
                         {ROLE_LABELS[role]}
                       </span>
                     ) : (
                       <span className="text-[10px] tracking-widest uppercase font-semibold px-3 py-1 rounded-full bg-[#F5F3EF] text-[#888]">
-                        {member.role || 'unknown'}
+                        {member.staff_role || 'unknown'}
                       </span>
                     )}
                     <span className="text-[10px] text-[#888] w-24 text-right">
@@ -217,7 +228,6 @@ export default function AdminStaffPage() {
           )}
         </div>
 
-        {/* Pending invites */}
         {invites.length > 0 && (
           <div className="bg-white rounded-xl border border-[#E8E5DF] overflow-hidden">
             <div className="px-6 py-4 border-b border-[#E8E5DF]">
@@ -225,26 +235,29 @@ export default function AdminStaffPage() {
               <p className="text-xs text-[#888] mt-0.5">Invitations that haven&apos;t been accepted yet.</p>
             </div>
             {invites.map(inv => {
-              const role = (inv.role || '') as StaffRole;
+              const role = (inv.staff_role || '') as StaffRole;
+              const fullName = [inv.first_name, inv.last_name].filter(Boolean).join(' ') || inv.email;
               return (
                 <div key={inv.id} className="flex items-center gap-4 px-6 py-4 border-b border-[#F5F3EF] last:border-0">
                   <div className="w-10 h-10 rounded-lg bg-[#F5F3EF] border border-dashed border-[#D8D5CF] flex items-center justify-center text-[#888] text-xs flex-shrink-0">
                     @
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-[#1A1A1A] truncate">{inv.email}</p>
+                    <p className="text-sm font-medium text-[#1A1A1A] truncate">{fullName}</p>
                     <p className="text-[11px] text-[#888]">
-                      Invited {inv.created_at ? new Date(inv.created_at).toLocaleDateString('en-IE', { day: 'numeric', month: 'short' }) : '—'}
+                      {inv.email}
+                      {inv.title ? ` · ${inv.title}` : ''}
+                      {' · '}Invited {inv.created_at ? new Date(inv.created_at).toLocaleDateString('en-IE', { day: 'numeric', month: 'short' }) : '—'}
                       {inv.expires_at ? ` · expires ${new Date(inv.expires_at).toLocaleDateString('en-IE', { day: 'numeric', month: 'short' })}` : ''}
                     </p>
                   </div>
-                  {STAFF_ROLES.includes(role) ? (
+                  {(STAFF_ROLES as readonly string[]).includes(role) ? (
                     <span className={`text-[10px] tracking-widest uppercase font-semibold px-3 py-1 rounded-full ${ROLE_TONE[role]}`}>
                       {ROLE_LABELS[role]}
                     </span>
                   ) : (
                     <span className="text-[10px] tracking-widest uppercase font-semibold px-3 py-1 rounded-full bg-[#F5F3EF] text-[#888]">
-                      {inv.role || 'unknown'}
+                      {inv.staff_role || 'unknown'}
                     </span>
                   )}
                   <span className="text-[10px] text-[#B8975A] tracking-widest uppercase w-24 text-right">Pending</span>

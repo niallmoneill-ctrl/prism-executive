@@ -5,22 +5,17 @@ import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase-browser';
 import { FUNCTIONS_URL } from '@/lib/supabase';
 
-const STAFF_ROLE_SET: ReadonlyArray<string> = [
-  'ceo','cfo','cto','operations_manager','senior_consultant','consultant',
-  'customer_support','marketing','finance','hr',
-];
-
 const STAFF_ROLES = [
-  { value: 'ceo',                label: 'CEO',                 hint: 'Full access to every workspace and finance.' },
-  { value: 'cfo',                label: 'CFO',                 hint: 'Finance, invoices, payments, reporting.' },
-  { value: 'cto',                label: 'CTO',                 hint: 'Engineering, integrations, system settings.' },
-  { value: 'operations_manager', label: 'Operations Manager',  hint: 'Pipeline, searches, candidates, scheduling.' },
-  { value: 'senior_consultant',  label: 'Senior Consultant',   hint: 'Owns retained searches and key accounts.' },
-  { value: 'consultant',         label: 'Consultant',          hint: 'Day-to-day candidate and client work.' },
-  { value: 'customer_support',   label: 'Customer Support',    hint: 'Client enquiries and account assistance.' },
-  { value: 'marketing',          label: 'Marketing',           hint: 'Campaigns, content, lead nurture.' },
-  { value: 'finance',            label: 'Finance',             hint: 'Invoicing, AR/AP, expense management.' },
-  { value: 'hr',                 label: 'HR',                  hint: 'People operations and internal onboarding.' },
+  { value: 'ceo',                label: 'CEO',                 dept: 'Executive', defaultTitle: 'Chief Executive Officer', hint: 'Full access to every workspace and finance.' },
+  { value: 'cfo',                label: 'CFO',                 dept: 'Finance',   defaultTitle: 'Chief Financial Officer', hint: 'Finance, invoices, payments, reporting.' },
+  { value: 'cto',                label: 'CTO',                 dept: 'Technology', defaultTitle: 'Chief Technology Officer', hint: 'Engineering, integrations, system settings.' },
+  { value: 'operations_manager', label: 'Operations Manager',  dept: 'Operations', defaultTitle: 'Operations Manager',    hint: 'Pipeline, searches, candidates, scheduling.' },
+  { value: 'senior_consultant',  label: 'Senior Consultant',   dept: 'Consulting', defaultTitle: 'Senior Consultant',     hint: 'Owns retained searches and key accounts.' },
+  { value: 'consultant',         label: 'Consultant',          dept: 'Consulting', defaultTitle: 'Consultant',            hint: 'Day-to-day candidate and client work.' },
+  { value: 'customer_support',   label: 'Customer Support',    dept: 'Customer Success', defaultTitle: 'Customer Support Specialist', hint: 'Client enquiries and account assistance.' },
+  { value: 'marketing',          label: 'Marketing',           dept: 'Marketing', defaultTitle: 'Marketing Specialist',   hint: 'Campaigns, content, lead nurture.' },
+  { value: 'finance',            label: 'Finance',             dept: 'Finance',   defaultTitle: 'Finance Specialist',     hint: 'Invoicing, AR/AP, expense management.' },
+  { value: 'hr',                 label: 'HR',                  dept: 'People',    defaultTitle: 'HR Manager',             hint: 'People operations and internal onboarding.' },
 ] as const;
 
 const inputClass =
@@ -32,24 +27,29 @@ export default function InviteStaffPage() {
   const [lastName, setLastName]   = useState('');
   const [email, setEmail]         = useState('');
   const [role, setRole]           = useState<string>('consultant');
+  const [title, setTitle]         = useState('');
+  const [department, setDepartment] = useState('');
   const [message, setMessage]     = useState('');
   const [loading, setLoading]     = useState(false);
   const [error, setError]         = useState('');
   const [success, setSuccess]     = useState('');
+  const [touched, setTouched]     = useState({ title: false, dept: false });
+
+  // Default title/department when the role changes (unless user has edited).
+  useEffect(() => {
+    const r = STAFF_ROLES.find(s => s.value === role);
+    if (!r) return;
+    if (!touched.title) setTitle(r.defaultTitle);
+    if (!touched.dept)  setDepartment(r.dept);
+  }, [role, touched.title, touched.dept]);
 
   useEffect(() => {
     (async () => {
       const supabase = createClient();
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) { window.location.href = '/login?redirect=/admin/staff/invite'; return; }
-      const { data: me } = await supabase
-        .from('profiles')
-        .select('role')
-        .eq('id', user.id)
-        .maybeSingle();
-      if (!me?.role || !STAFF_ROLE_SET.includes(me.role)) {
-        window.location.href = '/account';
-      }
+      const { data: isStaff } = await supabase.rpc('is_staff', { user_id: user.id });
+      if (isStaff !== true) { window.location.href = '/account'; }
     })();
   }, []);
 
@@ -69,28 +69,25 @@ export default function InviteStaffPage() {
       return;
     }
 
-    // Generate a single-use invite token. crypto.randomUUID is available in
-    // every browser we ship to (Edge, Safari 15+, Chromium, Firefox).
+    // Single-use invite token.
     const token = (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
       ? crypto.randomUUID()
       : Math.random().toString(36).slice(2) + Date.now().toString(36);
-
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
-
-    const inviteRow: Record<string, unknown> = {
-      email: email.trim().toLowerCase(),
-      role,
-      token,
-      invited_by: inviter.id,
-      expires_at: expiresAt,
-    };
-    if (firstName.trim()) inviteRow.first_name = firstName.trim();
-    if (lastName.trim())  inviteRow.last_name  = lastName.trim();
-    if (message.trim())   inviteRow.message    = message.trim();
 
     const { data: inserted, error: insertErr } = await supabase
       .from('staff_invites')
-      .insert(inviteRow)
+      .insert({
+        email: email.trim().toLowerCase(),
+        first_name: firstName.trim() || null,
+        last_name:  lastName.trim()  || null,
+        staff_role: role,
+        title:      title.trim()      || null,
+        department: department.trim() || null,
+        token,
+        invited_by: inviter.id,
+        expires_at: expiresAt,
+      })
       .select()
       .maybeSingle();
 
@@ -100,9 +97,6 @@ export default function InviteStaffPage() {
       return;
     }
 
-    // Notify the auth/onboarding side. We try the on-register edge function
-    // first (the project's invite hook) and fall back to send-email so the
-    // invitee always receives something. Either path is fire-and-forget.
     const origin = window.location.origin;
     const acceptUrl = `${origin}/register?invite=${encodeURIComponent(token)}&email=${encodeURIComponent(email.trim().toLowerCase())}`;
 
@@ -121,7 +115,9 @@ export default function InviteStaffPage() {
           email: email.trim().toLowerCase(),
           firstName: firstName.trim() || null,
           lastName:  lastName.trim()  || null,
-          role,
+          staffRole: role,
+          title:      title.trim()      || null,
+          department: department.trim() || null,
           token,
           acceptUrl,
           message: message.trim() || null,
@@ -147,8 +143,7 @@ export default function InviteStaffPage() {
         });
       }
     } catch {
-      // The invite row is committed regardless — the staff list still shows it
-      // as pending and the team can resend.
+      // The invite row is committed regardless.
     }
 
     setSuccess(`Invite sent to ${email}. They'll appear under Pending Invites until they accept.`);
@@ -227,6 +222,27 @@ export default function InviteStaffPage() {
                   <p className="text-[10px] text-[#888] leading-snug">{r.hint}</p>
                 </button>
               ))}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-[#333] mb-1.5">Title</label>
+              <input
+                value={title}
+                onChange={e => { setTitle(e.target.value); setTouched(t => ({ ...t, title: true })); }}
+                placeholder="e.g. Chief Operating Officer"
+                className={inputClass}
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-[#333] mb-1.5">Department</label>
+              <input
+                value={department}
+                onChange={e => { setDepartment(e.target.value); setTouched(t => ({ ...t, dept: true })); }}
+                placeholder="e.g. Operations"
+                className={inputClass}
+              />
             </div>
           </div>
 

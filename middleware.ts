@@ -1,19 +1,6 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
-const STAFF_ROLES = new Set([
-  'ceo',
-  'cfo',
-  'cto',
-  'operations_manager',
-  'senior_consultant',
-  'consultant',
-  'customer_support',
-  'marketing',
-  'finance',
-  'hr',
-]);
-
 export async function middleware(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });
 
@@ -56,28 +43,36 @@ export async function middleware(request: NextRequest) {
       return NextResponse.redirect(url);
     }
 
+    // Resolve permissions for the signed-in user. get_my_permissions()
+    // returns a jsonb of boolean flags (view_admin, manage_staff, …) or
+    // null if the user has no staff record.
     let allowed = false;
     try {
       const { data: perms } = await supabase.rpc('get_my_permissions');
-      if (Array.isArray(perms)) {
-        allowed = perms.length > 0;
-      } else if (perms && typeof perms === 'object') {
-        allowed = Object.keys(perms).length > 0;
-      } else if (typeof perms === 'string' && perms.length > 0) {
-        allowed = true;
+      if (perms && typeof perms === 'object' && !Array.isArray(perms)) {
+        // Primary gate: view_admin. Anyone with explicit admin visibility
+        // is allowed. Fall back to "has any permission" so a future role
+        // can't accidentally lose access to /admin.
+        const p = perms as Record<string, unknown>;
+        if (p.view_admin === true) {
+          allowed = true;
+        } else if (Object.values(p).some(v => v === true)) {
+          allowed = true;
+        }
       }
     } catch {
-      // Swallow and fall through to the role check.
+      // Swallow — fall through to the staff-row fallback.
     }
 
+    // Belt-and-braces fallback: if get_my_permissions misfires for any
+    // reason, allow anyone with a staff row so the team can't be locked
+    // out of the dashboard by an RPC outage.
     if (!allowed) {
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('role')
-        .eq('id', user.id)
-        .maybeSingle();
-      if (profile?.role && STAFF_ROLES.has(profile.role)) {
-        allowed = true;
+      try {
+        const { data: isStaff } = await supabase.rpc('is_staff', { user_id: user.id });
+        if (isStaff === true) allowed = true;
+      } catch {
+        // Ignore — handled by the redirect below.
       }
     }
 
