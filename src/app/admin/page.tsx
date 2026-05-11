@@ -147,7 +147,7 @@ export default function AdminPage() {
     {id:'overview',label:'Overview',e:'◆'},{id:'leads',label:'Leads',e:'◎'},
     {id:'companies',label:'Companies',e:'◫'},{id:'candidates',label:'Candidates',e:'◉'},
     {id:'searches',label:'Searches',e:'◇'},{id:'assessments',label:'Assessments',e:'◈'},
-    {id:'invoices',label:'Invoices',e:'▤'},{id:'activity',label:'Activity',e:'▥'},
+    {id:'invoices',label:'Invoices',e:'▤'},{id:'activity',label:'Activity',e:'▥'},{id:'skills',label:'Skills',e:'◑'},
   ];
 
   const timeAgo = (d: string) => {
@@ -510,7 +510,7 @@ export default function AdminPage() {
         </div>
         <div className="flex-1 px-2 space-y-0.5">
           {NAV.map(n=>(
-            <button key={n.id} onClick={()=>setPg(n.id)} title={sideOpen?undefined:n.label}
+            <button key={n.id} onClick={()=>setPg(n.id); if(n.id==='skills') window.location.href='/admin/skills'} title={sideOpen?undefined:n.label}
               className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-xs transition-colors ${pg===n.id?'bg-[#B8975A]/10 text-[#B8975A] font-semibold':'text-white/50 hover:bg-white/5'} ${sideOpen?'':'justify-center'}`}>
               <span className="text-sm flex-shrink-0">{n.e}</span>
               {sideOpen&&<span>{n.label}</span>}
