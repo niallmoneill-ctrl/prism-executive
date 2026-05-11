@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { FUNCTIONS_URL } from '@/lib/supabase';
+import { createClient } from '@/lib/supabase-browser';
 
 const TIERS = [
   {
@@ -35,14 +36,43 @@ export default function PricingPage() {
     const params = new URLSearchParams(window.location.search);
     if (params.get('success') === 'true') setSuccess(true);
     if (params.get('cancelled') === 'true') setCancelled(true);
+
+    // Resume checkout automatically if the user was bounced through register/login.
+    const resumeTier = params.get('tier');
+    if (resumeTier && !params.get('cancelled') && !params.get('success')) {
+      (async () => {
+        const supabase = createClient();
+        const { data } = await supabase.auth.getSession();
+        if (data.session?.access_token) {
+          handleCheckout(resumeTier);
+        }
+      })();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleCheckout = async (tier: string) => {
     setLoadingTier(tier);
     try {
+      const supabase = createClient();
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData.session?.access_token;
+
+      // Require sign-in before payment so we can attach userId to the Stripe
+      // session metadata — that's what the webhook keys off to activate the
+      // subscription and what /assess/professional uses to skip re-entry.
+      if (!accessToken) {
+        const next = encodeURIComponent(`/pricing?tier=${tier}`);
+        window.location.href = `/register?redirect=${next}`;
+        return;
+      }
+
       const res = await fetch(`${FUNCTIONS_URL}/create-checkout`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
         body: JSON.stringify({
           tier,
           // Stripe replaces {CHECKOUT_SESSION_ID} automatically

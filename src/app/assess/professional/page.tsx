@@ -2,6 +2,7 @@
 import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { FUNCTIONS_URL } from '@/lib/supabase';
+import { createClient } from '@/lib/supabase-browser';
 
 // ─── 80 QUESTIONS ────────────────────────────────────────────────────────────
 const QS = [
@@ -112,7 +113,7 @@ const QUALIFICATIONS = ["Doctorate (PhD, DBA, MD)","Master's (MSc, MBA, MA)","Po
 
 const inputClass = "w-full px-3 py-2.5 rounded-lg border border-[#E8E5DF] text-sm outline-none focus:border-[#B8975A] bg-white";
 
-type Step = 'verify' | 'intro' | 'assess' | 'profile' | 'generating' | 'report';
+type Step = 'verify' | 'auth' | 'intro' | 'assess' | 'profile' | 'generating' | 'report';
 
 // ─── BRAIN MAP SVG ────────────────────────────────────────────────────────────
 function BrainMap({ natural, adapted }: { natural: Record<string,number>; adapted: Record<string,number> }) {
@@ -247,26 +248,121 @@ export default function ProfessionalAssessPage() {
   const [gdpr, setGdpr]               = useState(false);
   const [marketing, setMarketing]     = useState(false);
 
-  // Verify session on mount
+  // Inline auth state (shown only if user lands on this page with a valid
+  // session_id but no active Supabase session — e.g. cookies cleared,
+  // checkout completed in a different browser, or success URL shared).
+  const [authMode, setAuthMode]       = useState<'signin' | 'signup'>('signin');
+  const [authPassword, setAuthPassword] = useState('');
+  const [authError, setAuthError]     = useState('');
+  const [authLoading, setAuthLoading] = useState(false);
+
+  // Verify session on mount: validate session_id, then resolve the user.
+  // Critically, do NOT redirect unauthenticated users away — show an
+  // inline "complete your account" form so paid sessions never lose access.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const sid = params.get('session_id');
-    if (sid && sid.startsWith('cs_')) {
-      setSID(sid);
-      // Try to recover saved progress
-      try {
-        const saved = sessionStorage.getItem('prism_pro_progress');
-        if (saved) {
-          const { answers: savedAnswers, qi: savedQi } = JSON.parse(saved);
-          setAnswers(savedAnswers || {});
-          setQi(savedQi || 0);
-        }
-      } catch {}
-      setStep('intro');
-    } else {
+    if (!sid || !sid.startsWith('cs_')) {
       window.location.href = '/pricing';
+      return;
     }
+    setSID(sid);
+
+    // Recover any in-flight assessment progress for this device.
+    try {
+      const saved = sessionStorage.getItem('prism_pro_progress');
+      if (saved) {
+        const { answers: savedAnswers, qi: savedQi } = JSON.parse(saved);
+        setAnswers(savedAnswers || {});
+        setQi(savedQi || 0);
+      }
+    } catch {}
+
+    (async () => {
+      const supabase = createClient();
+      const { data: userRes } = await supabase.auth.getUser();
+      const user = userRes.user;
+      if (!user) {
+        setStep('auth');
+        return;
+      }
+
+      // Prefill from the profile so the user never has to retype details
+      // they already provided at registration. This is the core fix for
+      // the "asked to register a second time" complaint.
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', user.id)
+        .maybeSingle();
+
+      if (profile) {
+        if (profile.first_name) setFirstName(profile.first_name);
+        if (profile.last_name)  setLastName(profile.last_name);
+        if (profile.email)      setEmail(profile.email);
+        else if (user.email)    setEmail(user.email);
+        if (profile.industry)   setIndustry(profile.industry);
+        if (profile.seniority)  setSeniority(profile.seniority);
+        // profile.role is the platform role ("candidate" etc.) — don't use it
+        // as the job-title field. Job title is a free-text assessment input.
+        if (profile.company)    setCompany(profile.company);
+        if (profile.location)   setLocation(profile.location);
+        if (profile.linkedin)   setLinkedin(profile.linkedin);
+        if (profile.phone)      setPhone(profile.phone);
+      } else if (user.email) {
+        setEmail(user.email);
+      }
+
+      setStep('intro');
+    })();
   }, []);
+
+  const handleInlineAuth = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email || !authPassword) return;
+    setAuthError('');
+    setAuthLoading(true);
+    const supabase = createClient();
+
+    if (authMode === 'signin') {
+      const { error } = await supabase.auth.signInWithPassword({ email, password: authPassword });
+      if (error) {
+        setAuthError(error.message);
+        setAuthLoading(false);
+        return;
+      }
+    } else {
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password: authPassword,
+        options: { emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(window.location.pathname + window.location.search)}` },
+      });
+      if (error) {
+        setAuthError(error.message);
+        setAuthLoading(false);
+        return;
+      }
+      // No session yet → email confirmation required. Tell the user.
+      if (!data.session) {
+        setAuthError('We just emailed you a confirmation link. Open it on this device, then return here.');
+        setAuthLoading(false);
+        return;
+      }
+      if (data.user) {
+        await supabase.from('profiles').upsert({
+          id: data.user.id,
+          email,
+          subscription_tier: 'professional',
+          role: 'candidate',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        });
+      }
+    }
+
+    // Reload so the mount effect re-runs and prefills from the now-signed-in profile.
+    window.location.reload();
+  };
 
   // Save progress to sessionStorage
   useEffect(() => {
@@ -358,6 +454,68 @@ export default function ProfessionalAssessPage() {
     return (
       <div className="min-h-screen bg-[#F5F3EF] flex items-center justify-center">
         <p className="text-[#888] text-sm">Verifying your payment…</p>
+      </div>
+    );
+  }
+
+  // ── AUTH (inline "complete your account" — only if paid but not signed in) ─
+  if (step === 'auth') {
+    return (
+      <div className="min-h-screen bg-[#F5F3EF] flex flex-col">
+        <nav className="bg-[#1A1A1A] px-6 h-14 flex items-center justify-between">
+          <Link href="/" className="flex items-center gap-3">
+            <div className="w-9 h-9 border border-[#B8975A]/40 rounded flex items-center justify-center font-display text-xl font-semibold text-[#B8975A]">P</div>
+            <span className="text-[#B8975A] text-xs tracking-[0.25em]">PRISM EXECUTIVE</span>
+          </Link>
+          <span className="text-[#B8975A] text-[10px] tracking-widest uppercase">Professional</span>
+        </nav>
+
+        <div className="flex-1 flex items-center justify-center px-6 py-12">
+          <div className="w-full max-w-md">
+            <div className="text-center mb-6">
+              <div className="inline-block bg-green-50 border border-green-200 text-green-700 text-[10px] tracking-[0.2em] uppercase px-3 py-1 rounded-full mb-4">Payment Confirmed</div>
+              <h1 className="font-display text-2xl text-[#1A1A1A] mb-2">
+                {authMode === 'signin' ? 'Sign in to access your assessment' : 'Set a password to access your assessment'}
+              </h1>
+              <p className="text-[#888] text-xs">
+                {authMode === 'signin'
+                  ? 'Use the account you registered with before paying.'
+                  : 'This lets you return later and access your saved report.'}
+              </p>
+            </div>
+
+            <div className="bg-white rounded-xl p-7 border border-[#E8E5DF]">
+              {authError && <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-xs text-red-700 mb-4">{authError}</div>}
+
+              <form onSubmit={handleInlineAuth} className="space-y-4">
+                <div>
+                  <label className="block text-[11px] font-medium text-[#333] mb-1.5">Email Address</label>
+                  <input type="email" value={email} onChange={e => setEmail(e.target.value)} required placeholder="your@email.com"
+                    className="w-full px-3 py-2.5 rounded-lg border border-[#E8E5DF] text-sm outline-none focus:border-[#B8975A] bg-white"/>
+                </div>
+                <div>
+                  <label className="block text-[11px] font-medium text-[#333] mb-1.5">Password</label>
+                  <input type="password" value={authPassword} onChange={e => setAuthPassword(e.target.value)} required
+                    placeholder={authMode === 'signin' ? '••••••••' : 'Min. 8 characters'}
+                    className="w-full px-3 py-2.5 rounded-lg border border-[#E8E5DF] text-sm outline-none focus:border-[#B8975A] bg-white"/>
+                </div>
+                <button type="submit" disabled={authLoading || !email || !authPassword || (authMode === 'signup' && authPassword.length < 8)}
+                  className="w-full bg-[#B8975A] hover:bg-[#96793F] text-white py-3 rounded-lg text-sm font-medium tracking-wide transition-colors disabled:opacity-40">
+                  {authLoading ? 'Please wait…' : authMode === 'signin' ? 'Continue to Assessment' : 'Create Account & Continue'}
+                </button>
+              </form>
+
+              <div className="mt-5 pt-4 border-t border-[#E8E5DF] text-center">
+                <button onClick={() => { setAuthError(''); setAuthMode(authMode === 'signin' ? 'signup' : 'signin'); }}
+                  className="text-xs text-[#888] hover:text-[#333]">
+                  {authMode === 'signin' ? "Don't have an account yet? Create one" : 'Already have an account? Sign in'}
+                </button>
+              </div>
+
+              <p className="text-[10px] text-[#888] text-center mt-4">Session {sessionId.slice(0, 18)}…</p>
+            </div>
+          </div>
+        </div>
       </div>
     );
   }

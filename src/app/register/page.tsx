@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase-browser';
 
@@ -19,6 +19,13 @@ export default function RegisterPage() {
   const [loading, setLoading]     = useState(false);
   const [error, setError]         = useState('');
   const [done, setDone]           = useState(false);
+  const [redirect, setRedirect]   = useState('/account');
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const r = params.get('redirect');
+    if (r) setRedirect(r);
+  }, []);
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -26,11 +33,12 @@ export default function RegisterPage() {
     setLoading(true); setError('');
 
     const supabase = createClient();
+    const emailRedirectTo = `${window.location.origin}/auth/callback?next=${encodeURIComponent(redirect)}`;
     const { data, error: err } = await supabase.auth.signUp({
       email,
       password,
       options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
+        emailRedirectTo,
         data: { first_name: firstName, last_name: lastName, industry, seniority, role },
       },
     });
@@ -57,6 +65,15 @@ export default function RegisterPage() {
       });
     }
 
+    // If Supabase returned a session, email confirmation is disabled — the
+    // user is fully signed in. Send them straight to where they were going
+    // (e.g. /pricing?tier=professional) so checkout can resume without a
+    // second "register again" step.
+    if (data.session) {
+      window.location.href = redirect;
+      return;
+    }
+
     setDone(true);
     setLoading(false);
   };
@@ -71,7 +88,7 @@ export default function RegisterPage() {
             We&apos;ve sent a confirmation link to <strong className="text-[#333]">{email}</strong>.
             Click it to activate your account and access your reports.
           </p>
-          <Link href="/login" className="inline-block bg-[#B8975A] hover:bg-[#96793F] text-white px-8 py-3 rounded-lg text-sm font-medium tracking-wide transition-colors">
+          <Link href={`/login?redirect=${encodeURIComponent(redirect)}`} className="inline-block bg-[#B8975A] hover:bg-[#96793F] text-white px-8 py-3 rounded-lg text-sm font-medium tracking-wide transition-colors">
             Back to Sign In
           </Link>
         </div>
@@ -150,7 +167,7 @@ export default function RegisterPage() {
             <div className="mt-6 pt-5 border-t border-[#E8E5DF] text-center">
               <p className="text-xs text-[#888]">
                 Already have an account?{' '}
-                <Link href="/login" className="text-[#B8975A] font-medium hover:underline">Sign in</Link>
+                <Link href={`/login?redirect=${encodeURIComponent(redirect)}`} className="text-[#B8975A] font-medium hover:underline">Sign in</Link>
               </p>
             </div>
           </div>
