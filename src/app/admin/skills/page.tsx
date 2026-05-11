@@ -211,16 +211,16 @@ export default function SkillsPage() {
 
   return (
     <div className="min-h-screen bg-[#F5F3EF] flex flex-col">
-      <nav className="bg-[#1A1A1A] px-6 h-14 flex items-center justify-between sticky top-0 z-40">
-        <Link href="/admin" className="flex items-center gap-3">
-          <div className="w-9 h-9 border border-[#B8975A]/40 rounded flex items-center justify-center font-display text-xl font-semibold text-[#B8975A]">P</div>
-          <span className="text-[#B8975A] text-xs tracking-[0.25em]">PRISM EXECUTIVE</span>
-          <span className="text-white/30 text-[10px] tracking-[0.25em] uppercase ml-1">Admin · Skills</span>
+      <nav className="bg-[#1A1A1A] px-4 sm:px-6 h-14 flex items-center justify-between sticky top-0 z-40">
+        <Link href="/admin" className="flex items-center gap-2 sm:gap-3 min-w-0">
+          <div className="w-9 h-9 border border-[#B8975A]/40 rounded flex items-center justify-center font-display text-xl font-semibold text-[#B8975A] flex-shrink-0">P</div>
+          <span className="text-[#B8975A] text-xs tracking-[0.25em] truncate">PRISM EXECUTIVE</span>
+          <span className="hidden sm:inline text-white/30 text-[10px] tracking-[0.25em] uppercase ml-1">Admin · Skills</span>
         </Link>
-        <Link href="/admin" className="text-[10px] text-white/40 hover:text-[#B8975A] tracking-[0.15em] uppercase">← Dashboard</Link>
+        <Link href="/admin" className="text-[10px] text-white/40 hover:text-[#B8975A] tracking-[0.15em] uppercase whitespace-nowrap">← Dashboard</Link>
       </nav>
 
-      <div className="flex-1 max-w-7xl mx-auto w-full px-6 py-8">
+      <div className="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 py-6 sm:py-8">
         <div className="mb-6">
           <p className="text-[10px] tracking-[0.3em] uppercase text-[#888] mb-2">AI Workforce</p>
           <h1 className="font-display text-3xl text-[#1A1A1A]">Skills</h1>
@@ -235,9 +235,9 @@ export default function SkillsPage() {
           </div>
         )}
 
-        <div className="flex gap-5" style={{ minHeight: 'calc(100vh - 280px)' }}>
+        <div className="flex flex-col md:flex-row gap-5 md:min-h-[calc(100vh-280px)]">
           {/* Skills list */}
-          <div className="w-72 flex-shrink-0 overflow-y-auto">
+          <div className="w-full md:w-72 md:flex-shrink-0 md:overflow-y-auto">
             <h2 className="font-display text-lg text-[#1A1A1A] mb-4">AI Skills Team</h2>
             {skills.length === 0 ? (
               <div className="bg-white rounded-xl border border-[#E8E5DF] p-6 text-center">
@@ -295,7 +295,7 @@ export default function SkillsPage() {
             ) : (
               <>
                 {/* Skill header */}
-                <div className="bg-white rounded-xl border border-[#E8E5DF] p-4 mb-4 flex items-center gap-4">
+                <div className="bg-white rounded-xl border border-[#E8E5DF] p-4 mb-4 flex items-center gap-4 flex-wrap">
                   <div className="w-12 h-12 rounded-xl flex items-center justify-center text-sm font-bold text-white flex-shrink-0"
                     style={{ background: selected.color }}>
                     {selected.avatar_initials}
@@ -304,7 +304,7 @@ export default function SkillsPage() {
                     <h3 className="font-display text-lg font-semibold text-[#1A1A1A] truncate">{selected.persona_name}</h3>
                     <p className="text-xs text-[#888] truncate">{selected.role_title} · Reports to {selected.reports_to === 'orla_brennan' ? 'Orla Brennan' : selected.reports_to?.toUpperCase() || 'Leadership'}</p>
                   </div>
-                  <div className="flex gap-2 flex-shrink-0">
+                  <div className="flex gap-2 flex-shrink-0 flex-wrap w-full sm:w-auto">
                     {(['chat','tasks','reports'] as const).map(tab => (
                       <button key={tab} onClick={() => setActiveTab(tab)}
                         className={`px-3 py-1.5 rounded-lg text-[11px] font-semibold capitalize transition-colors ${

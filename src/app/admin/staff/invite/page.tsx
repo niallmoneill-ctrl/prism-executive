@@ -154,16 +154,16 @@ export default function InviteStaffPage() {
 
   return (
     <div className="min-h-screen bg-[#F5F3EF] flex flex-col">
-      <nav className="bg-[#1A1A1A] px-6 h-14 flex items-center justify-between sticky top-0 z-40">
-        <Link href="/admin" className="flex items-center gap-3">
-          <div className="w-9 h-9 border border-[#B8975A]/40 rounded flex items-center justify-center font-display text-xl font-semibold text-[#B8975A]">P</div>
-          <span className="text-[#B8975A] text-xs tracking-[0.25em]">PRISM EXECUTIVE</span>
-          <span className="text-white/30 text-[10px] tracking-[0.25em] uppercase ml-1">Admin · Staff · Invite</span>
+      <nav className="bg-[#1A1A1A] px-4 sm:px-6 h-14 flex items-center justify-between sticky top-0 z-40">
+        <Link href="/admin" className="flex items-center gap-2 sm:gap-3 min-w-0">
+          <div className="w-9 h-9 border border-[#B8975A]/40 rounded flex items-center justify-center font-display text-xl font-semibold text-[#B8975A] flex-shrink-0">P</div>
+          <span className="text-[#B8975A] text-xs tracking-[0.25em] truncate">PRISM EXECUTIVE</span>
+          <span className="hidden sm:inline text-white/30 text-[10px] tracking-[0.25em] uppercase ml-1">Admin · Staff · Invite</span>
         </Link>
-        <Link href="/admin/staff" className="text-[10px] text-white/40 hover:text-[#B8975A] tracking-[0.15em] uppercase">← Staff</Link>
+        <Link href="/admin/staff" className="text-[10px] text-white/40 hover:text-[#B8975A] tracking-[0.15em] uppercase whitespace-nowrap">← Staff</Link>
       </nav>
 
-      <div className="flex-1 max-w-2xl mx-auto w-full px-6 py-12">
+      <div className="flex-1 max-w-2xl mx-auto w-full px-4 sm:px-6 py-8 sm:py-12">
         <div className="mb-8">
           <p className="text-[10px] tracking-[0.3em] uppercase text-[#888] mb-2">Team Management</p>
           <h1 className="font-display text-3xl text-[#1A1A1A] mb-1">Invite a Team Member</h1>

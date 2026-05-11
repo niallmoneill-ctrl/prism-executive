@@ -9,6 +9,7 @@ const STATUS_COLORS: Record<string,string> = {new:'red',contacted:'blue',qualifi
 export default function AdminPage() {
   const [pg, setPg] = useState('overview');
   const [sideOpen, setSideOpen] = useState(true);
+  const [mobileOpen, setMobileOpen] = useState(false);
   const [detail, setDetail] = useState<any>(null);
   const [detailType, setDetailType] = useState('');
   const [noteText, setNoteText] = useState('');
@@ -501,45 +502,97 @@ export default function AdminPage() {
     );
   };
 
+  // Sidebar nav click — on mobile, dismiss the drawer after selection so the
+  // user is not stuck behind it.
+  const navClick = (id: string) => {
+    if (id === 'skills') { window.location.href = '/admin/skills'; return; }
+    if (id === 'staff')  { window.location.href = '/admin/staff';  return; }
+    setPg(id);
+    setMobileOpen(false);
+  };
+
+  // One burger button. < md collapses/expands the mobile drawer.
+  // >= md keeps the existing expanded ↔ icon-rail toggle.
+  const onBurgerClick = () => {
+    if (typeof window !== 'undefined' && window.innerWidth < 768) {
+      setMobileOpen(o => !o);
+    } else {
+      setSideOpen(o => !o);
+    }
+  };
+
   return (
     <div className="flex h-screen bg-[#F5F3EF] text-[#333] overflow-hidden">
-      {/* Sidebar — unchanged */}
-      <div className={`${sideOpen?'w-52':'w-14'} flex-shrink-0 bg-[#0F1D35] flex flex-col border-r border-white/5 transition-all duration-200 overflow-hidden`}>
-        <div onClick={()=>setSideOpen(!sideOpen)} className="p-4 flex items-center gap-2.5 cursor-pointer">
+      {/* Mobile backdrop */}
+      {mobileOpen && (
+        <div
+          onClick={() => setMobileOpen(false)}
+          className="md:hidden fixed inset-0 bg-black/40 z-40"
+        />
+      )}
+
+      {/* Sidebar — off-canvas on mobile, in-flow on md+ */}
+      <div
+        className={`
+          fixed inset-y-0 left-0 z-50 w-64
+          ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}
+          md:static md:translate-x-0 md:z-auto md:w-auto
+          ${sideOpen ? 'md:w-52' : 'md:w-14'}
+          flex-shrink-0 bg-[#0F1D35] flex flex-col border-r border-white/5
+          transform transition-all duration-200 overflow-hidden
+        `}
+      >
+        <div onClick={() => { setSideOpen(!sideOpen); }} className="p-4 flex items-center gap-2.5 cursor-pointer">
           <div className="w-8 h-8 bg-gradient-to-br from-[#B8975A] to-[#96793F] rounded-md flex items-center justify-center font-display text-base font-bold text-[#0F1D35] flex-shrink-0">P</div>
-          {sideOpen&&<div><div className="text-[#B8975A] font-display font-bold text-xs tracking-[0.15em]">PRISM</div><div className="text-white/25 text-[7px] tracking-wider">ADMIN</div></div>}
+          {/* Visible on the mobile drawer (always wide) and when desktop is expanded. Hidden on desktop only when collapsed. */}
+          <div className={sideOpen ? 'block' : 'block md:hidden'}>
+            <div className="text-[#B8975A] font-display font-bold text-xs tracking-[0.15em]">PRISM</div>
+            <div className="text-white/25 text-[7px] tracking-wider">ADMIN</div>
+          </div>
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); setMobileOpen(false); }}
+            className="md:hidden ml-auto text-white/40 hover:text-white text-lg leading-none px-2"
+            aria-label="Close menu"
+          >
+            ✕
+          </button>
         </div>
-        <div className="flex-1 px-2 space-y-0.5">
-          {NAV.map(n=>(
-            <button key={n.id} onClick={()=>{ if(n.id==='skills'){ window.location.href='/admin/skills'; } else if(n.id==='staff'){ window.location.href='/admin/staff'; } else { setPg(n.id); } }} title={sideOpen?undefined:n.label}
-              className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-xs transition-colors ${pg===n.id?'bg-[#B8975A]/10 text-[#B8975A] font-semibold':'text-white/50 hover:bg-white/5'} ${sideOpen?'':'justify-center'}`}>
+        <div className="flex-1 px-2 space-y-0.5 overflow-y-auto">
+          {NAV.map(n => (
+            <button
+              key={n.id}
+              onClick={() => navClick(n.id)}
+              title={sideOpen ? undefined : n.label}
+              className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-xs transition-colors
+                ${pg === n.id ? 'bg-[#B8975A]/10 text-[#B8975A] font-semibold' : 'text-white/50 hover:bg-white/5'}
+                ${sideOpen ? '' : 'md:justify-center'}`}
+            >
               <span className="text-sm flex-shrink-0">{n.e}</span>
-              {sideOpen&&<span>{n.label}</span>}
-              {n.id==='leads'&&data.leads.filter((l:any)=>l.status==='new').length>0&&(
+              <span className={sideOpen ? 'inline' : 'inline md:hidden'}>{n.label}</span>
+              {n.id === 'leads' && data.leads.filter((l: any) => l.status === 'new').length > 0 && (
                 <span className="ml-auto w-4 h-4 rounded-full bg-red-500 text-white text-[9px] flex items-center justify-center font-bold">
-                  {data.leads.filter((l:any)=>l.status==='new').length}
+                  {data.leads.filter((l: any) => l.status === 'new').length}
                 </span>
               )}
             </button>
           ))}
         </div>
-        {sideOpen&&(
-          <div className="p-3 border-t border-white/5 flex items-center gap-2">
-            <div className="w-7 h-7 rounded-md bg-gradient-to-br from-[#B8975A] to-[#96793F] flex items-center justify-center text-[10px] font-bold text-[#0F1D35]">OB</div>
-            <div><div className="text-white text-[11px] font-semibold">Orla Brennan</div><div className="text-white/30 text-[9px]">CEO</div></div>
-          </div>
-        )}
+        <div className={`p-3 border-t border-white/5 items-center gap-2 ${sideOpen ? 'flex' : 'flex md:hidden'}`}>
+          <div className="w-7 h-7 rounded-md bg-gradient-to-br from-[#B8975A] to-[#96793F] flex items-center justify-center text-[10px] font-bold text-[#0F1D35]">OB</div>
+          <div><div className="text-white text-[11px] font-semibold">Orla Brennan</div><div className="text-white/30 text-[9px]">CEO</div></div>
+        </div>
       </div>
 
-      {/* Main — unchanged */}
+      {/* Main */}
       <div className="flex-1 flex flex-col overflow-hidden min-w-0">
-        <div className="h-12 px-5 flex items-center justify-between border-b border-[#E8E5DF] bg-white flex-shrink-0">
-          <div className="flex items-center gap-3">
-            <button onClick={()=>setSideOpen(!sideOpen)} className="text-[#888] text-base">☰</button>
-            <span className="text-xs text-[#888] font-medium">{NAV.find(n=>n.id===pg)?.label||'Overview'}</span>
+        <div className="h-12 px-4 sm:px-5 flex items-center justify-between border-b border-[#E8E5DF] bg-white flex-shrink-0">
+          <div className="flex items-center gap-3 min-w-0">
+            <button onClick={onBurgerClick} className="text-[#666] text-lg leading-none p-1 -ml-1" aria-label="Toggle menu">☰</button>
+            <span className="text-xs text-[#888] font-medium truncate">{NAV.find(n => n.id === pg)?.label || 'Overview'}</span>
           </div>
-          <div className="flex items-center gap-2">
-            <Link href="/" className="text-[10px] text-[#888] hover:text-[#B8975A]">← Site</Link>
+          <div className="flex items-center gap-3">
+            <Link href="/" className="text-[10px] text-[#888] hover:text-[#B8975A] whitespace-nowrap">← Site</Link>
             <div className="w-2 h-2 rounded-full bg-green-500"/>
           </div>
         </div>

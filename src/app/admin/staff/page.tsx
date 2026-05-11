@@ -125,17 +125,17 @@ export default function AdminStaffPage() {
 
   return (
     <div className="min-h-screen bg-[#F5F3EF]">
-      <nav className="bg-[#1A1A1A] px-6 h-14 flex items-center justify-between sticky top-0 z-40">
-        <Link href="/admin" className="flex items-center gap-3">
-          <div className="w-9 h-9 border border-[#B8975A]/40 rounded flex items-center justify-center font-display text-xl font-semibold text-[#B8975A]">P</div>
-          <span className="text-[#B8975A] text-xs tracking-[0.25em]">PRISM EXECUTIVE</span>
-          <span className="text-white/30 text-[10px] tracking-[0.25em] uppercase ml-1">Admin · Staff</span>
+      <nav className="bg-[#1A1A1A] px-4 sm:px-6 h-14 flex items-center justify-between sticky top-0 z-40">
+        <Link href="/admin" className="flex items-center gap-2 sm:gap-3 min-w-0">
+          <div className="w-9 h-9 border border-[#B8975A]/40 rounded flex items-center justify-center font-display text-xl font-semibold text-[#B8975A] flex-shrink-0">P</div>
+          <span className="text-[#B8975A] text-xs tracking-[0.25em] truncate">PRISM EXECUTIVE</span>
+          <span className="hidden sm:inline text-white/30 text-[10px] tracking-[0.25em] uppercase ml-1">Admin · Staff</span>
         </Link>
-        <Link href="/admin" className="text-[10px] text-white/40 hover:text-[#B8975A] tracking-[0.15em] uppercase">← Dashboard</Link>
+        <Link href="/admin" className="text-[10px] text-white/40 hover:text-[#B8975A] tracking-[0.15em] uppercase whitespace-nowrap">← Dashboard</Link>
       </nav>
 
-      <div className="max-w-6xl mx-auto px-6 py-10">
-        <div className="flex items-end justify-between mb-8">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8 sm:py-10">
+        <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 mb-8">
           <div>
             <p className="text-[10px] tracking-[0.3em] uppercase text-[#888] mb-2">Team Management</p>
             <h1 className="font-display text-3xl text-[#1A1A1A]">Staff</h1>
@@ -146,7 +146,7 @@ export default function AdminStaffPage() {
           </div>
           <Link
             href="/admin/staff/invite"
-            className="bg-[#B8975A] hover:bg-[#96793F] text-white px-5 py-2.5 rounded-lg text-xs font-medium tracking-[0.15em] uppercase transition-colors"
+            className="bg-[#B8975A] hover:bg-[#96793F] text-white px-5 py-2.5 rounded-lg text-xs font-medium tracking-[0.15em] uppercase transition-colors text-center self-start sm:self-auto"
           >
             + Invite Staff
           </Link>
@@ -197,7 +197,7 @@ export default function AdminStaffPage() {
                 const initials = `${(profile?.first_name?.[0] || '?').toUpperCase()}${(profile?.last_name?.[0] || '').toUpperCase()}`;
                 const fullName = [profile?.first_name, profile?.last_name].filter(Boolean).join(' ') || profile?.email || 'Unnamed staff';
                 return (
-                  <div key={member.id} className="flex items-center gap-4 px-6 py-4 border-b border-[#F5F3EF] last:border-0">
+                  <div key={member.id} className="flex items-center gap-3 sm:gap-4 px-4 sm:px-6 py-4 border-b border-[#F5F3EF] last:border-0">
                     <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-[#B8975A] to-[#96793F] flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
                       {initials}
                     </div>
@@ -210,15 +210,15 @@ export default function AdminStaffPage() {
                       </p>
                     </div>
                     {(STAFF_ROLES as readonly string[]).includes(role) ? (
-                      <span className={`text-[10px] tracking-widest uppercase font-semibold px-3 py-1 rounded-full ${ROLE_TONE[role]}`}>
+                      <span className={`text-[10px] tracking-widest uppercase font-semibold px-2.5 py-1 rounded-full flex-shrink-0 ${ROLE_TONE[role]}`}>
                         {ROLE_LABELS[role]}
                       </span>
                     ) : (
-                      <span className="text-[10px] tracking-widest uppercase font-semibold px-3 py-1 rounded-full bg-[#F5F3EF] text-[#888]">
+                      <span className="text-[10px] tracking-widest uppercase font-semibold px-2.5 py-1 rounded-full bg-[#F5F3EF] text-[#888] flex-shrink-0">
                         {member.staff_role || 'unknown'}
                       </span>
                     )}
-                    <span className="text-[10px] text-[#888] w-24 text-right">
+                    <span className="hidden md:inline text-[10px] text-[#888] w-24 text-right flex-shrink-0">
                       {member.created_at ? new Date(member.created_at).toLocaleDateString('en-IE', { day: 'numeric', month: 'short', year: 'numeric' }) : ''}
                     </span>
                   </div>
@@ -238,13 +238,13 @@ export default function AdminStaffPage() {
               const role = (inv.staff_role || '') as StaffRole;
               const fullName = [inv.first_name, inv.last_name].filter(Boolean).join(' ') || inv.email;
               return (
-                <div key={inv.id} className="flex items-center gap-4 px-6 py-4 border-b border-[#F5F3EF] last:border-0">
+                <div key={inv.id} className="flex items-center gap-3 sm:gap-4 px-4 sm:px-6 py-4 border-b border-[#F5F3EF] last:border-0">
                   <div className="w-10 h-10 rounded-lg bg-[#F5F3EF] border border-dashed border-[#D8D5CF] flex items-center justify-center text-[#888] text-xs flex-shrink-0">
                     @
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-[#1A1A1A] truncate">{fullName}</p>
-                    <p className="text-[11px] text-[#888]">
+                    <p className="text-[11px] text-[#888] truncate">
                       {inv.email}
                       {inv.title ? ` · ${inv.title}` : ''}
                       {' · '}Invited {inv.created_at ? new Date(inv.created_at).toLocaleDateString('en-IE', { day: 'numeric', month: 'short' }) : '—'}
@@ -252,15 +252,15 @@ export default function AdminStaffPage() {
                     </p>
                   </div>
                   {(STAFF_ROLES as readonly string[]).includes(role) ? (
-                    <span className={`text-[10px] tracking-widest uppercase font-semibold px-3 py-1 rounded-full ${ROLE_TONE[role]}`}>
+                    <span className={`text-[10px] tracking-widest uppercase font-semibold px-2.5 py-1 rounded-full flex-shrink-0 ${ROLE_TONE[role]}`}>
                       {ROLE_LABELS[role]}
                     </span>
                   ) : (
-                    <span className="text-[10px] tracking-widest uppercase font-semibold px-3 py-1 rounded-full bg-[#F5F3EF] text-[#888]">
+                    <span className="text-[10px] tracking-widest uppercase font-semibold px-2.5 py-1 rounded-full bg-[#F5F3EF] text-[#888] flex-shrink-0">
                       {inv.staff_role || 'unknown'}
                     </span>
                   )}
-                  <span className="text-[10px] text-[#B8975A] tracking-widest uppercase w-24 text-right">Pending</span>
+                  <span className="hidden md:inline text-[10px] text-[#B8975A] tracking-widest uppercase w-24 text-right flex-shrink-0">Pending</span>
                 </div>
               );
             })}
