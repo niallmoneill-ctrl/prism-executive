@@ -1,9 +1,14 @@
 'use client';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase-browser';
 import { FUNCTIONS_URL } from '@/lib/supabase';
+
+const STAFF_ROLE_SET: ReadonlyArray<string> = [
+  'ceo','cfo','cto','operations_manager','senior_consultant','consultant',
+  'customer_support','marketing','finance','hr',
+];
 
 const STAFF_ROLES = [
   { value: 'ceo',                label: 'CEO',                 hint: 'Full access to every workspace and finance.' },
@@ -31,6 +36,22 @@ export default function InviteStaffPage() {
   const [loading, setLoading]     = useState(false);
   const [error, setError]         = useState('');
   const [success, setSuccess]     = useState('');
+
+  useEffect(() => {
+    (async () => {
+      const supabase = createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) { window.location.href = '/login?redirect=/admin/staff/invite'; return; }
+      const { data: me } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', user.id)
+        .maybeSingle();
+      if (!me?.role || !STAFF_ROLE_SET.includes(me.role)) {
+        window.location.href = '/account';
+      }
+    })();
+  }, []);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();

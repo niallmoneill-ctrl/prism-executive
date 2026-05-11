@@ -70,6 +70,22 @@ export default function AdminStaffPage() {
   useEffect(() => {
     (async () => {
       const supabase = createClient();
+
+      // Defence-in-depth: middleware already gates /admin server-side, but
+      // prerendered `'use client'` pages can be served from CDN cache, so
+      // mirror the auth + role check on the client too.
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) { window.location.href = '/login?redirect=/admin/staff'; return; }
+      const { data: me } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', user.id)
+        .maybeSingle();
+      if (!me?.role || !(STAFF_ROLES as readonly string[]).includes(me.role)) {
+        window.location.href = '/account';
+        return;
+      }
+
       const { data: members, error: membersErr } = await supabase
         .from('profiles')
         .select('id, email, first_name, last_name, role, created_at')
