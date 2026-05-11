@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase-browser';
+import { FUNCTIONS_URL } from '@/lib/supabase';
 
 const inputClass = "w-full px-4 py-3 rounded-lg border border-[#E8E5DF] text-sm outline-none focus:border-[#B8975A] bg-white placeholder:text-[#bbb] transition-colors";
 
@@ -20,11 +21,18 @@ export default function RegisterPage() {
   const [error, setError]         = useState('');
   const [done, setDone]           = useState(false);
   const [redirect, setRedirect]   = useState('/account');
+  const [inviteToken, setInviteToken] = useState('');
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const r = params.get('redirect');
     if (r) setRedirect(r);
+    const invite = params.get('invite');
+    if (invite) setInviteToken(invite);
+    // Staff invite emails include the invitee's address — prefill so they
+    // can't accidentally register the wrong email and miss the invite match.
+    const inviteEmail = params.get('email');
+    if (inviteEmail) setEmail(inviteEmail);
   }, []);
 
   const handleRegister = async (e: React.FormEvent) => {
@@ -33,7 +41,11 @@ export default function RegisterPage() {
     setLoading(true); setError('');
 
     const supabase = createClient();
-    const emailRedirectTo = `${window.location.origin}/auth/callback?next=${encodeURIComponent(redirect)}`;
+    // Carry the invite token through email confirmation so /auth/callback
+    // can pass it to on-register and provision the staff record.
+    const callbackParams = new URLSearchParams({ next: redirect });
+    if (inviteToken) callbackParams.set('invite', inviteToken);
+    const emailRedirectTo = `${window.location.origin}/auth/callback?${callbackParams.toString()}`;
     const { data, error: err } = await supabase.auth.signUp({
       email,
       password,
@@ -70,6 +82,25 @@ export default function RegisterPage() {
     // (e.g. /pricing?tier=professional) so checkout can resume without a
     // second "register again" step.
     if (data.session) {
+      // Fire-and-forget post-registration hook. Provisions staff records
+      // for invited users; no-op for everyone else.
+      try {
+        await fetch(`${FUNCTIONS_URL}/on-register`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${data.session.access_token}`,
+          },
+          body: JSON.stringify({
+            event: 'user_registered',
+            userId: data.user?.id,
+            email,
+            token: inviteToken || undefined,
+          }),
+        });
+      } catch {
+        // Non-blocking — the user is signed in; we move on.
+      }
       window.location.href = redirect;
       return;
     }
